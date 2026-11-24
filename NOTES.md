@@ -44,4 +44,10 @@ Study crops: 40 for the user study, the remaining 96 for the submitted dataset.
 
 ## Decisions
 
-- Detector backbone: <fill in after the smoke test: ResNet-50 FPN v2 or MobileNet v3, and why>
+- Detector backbone: - Detector backbone: Faster R-CNN ResNet-50 FPN v2. CPU training: about 13 s per step (batch 2),
+  acceptable for overnight evaluation. Kept over MobileNet because MinneApple apples are mostly small.
+- In-app training rounds: 6 epochs (RETRAIN_EPOCHS) to keep a round around 10 minutes on CPU.
+  Offline learning curve: 10 epochs.
+- Smoke test (20 test crops): pretrained AP50 0.569, after 10 crops x 2 epochs AP50 0.654.
+- SAM 2.1 tiny smoke test (30 apples, 26 small): mIoU@1 0.66, @5 0.81, box prompt 0.78, NoC@85 10.5.
+  Small apples: 1 px boundary error is already about 0.81 IoU for a 20 px apple.
