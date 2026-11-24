@@ -1,0 +1,14 @@
+# NVIDIA GPU: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu121
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

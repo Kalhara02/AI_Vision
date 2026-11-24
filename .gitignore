@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/data/
+backend/*.db
+node_modules/
+frontend/dist/
+.env
+.DS_Store
+weights/
+eval/results/
+data/
+gt_check.png
