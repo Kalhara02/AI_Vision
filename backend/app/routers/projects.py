@@ -34,8 +34,13 @@ def _project_out(db: Session, p: models.Project) -> schemas.ProjectOut:
         select(func.count()).select_from(models.Image)
         .where(models.Image.project_id == p.id, models.Image.status == "done")
     ) or 0
+    n_ann = db.scalar(
+        select(func.count()).select_from(models.Annotation).join(models.Image)
+        .where(models.Image.project_id == p.id)
+    ) or 0
+    cover = db.scalar(select(models.Image.id).where(models.Image.project_id == p.id).order_by(models.Image.id).limit(1))
     out = schemas.ProjectOut.model_validate(p)
-    out.image_count, out.done_count = total, done
+    out.image_count, out.done_count, out.annotation_count, out.cover_image_id = total, done, n_ann, cover
     return out
 
 

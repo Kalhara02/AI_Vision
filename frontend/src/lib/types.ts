@@ -21,6 +21,8 @@ export interface Project {
   classes: LabelClass[];
   image_count: number;
   done_count: number;
+  annotation_count: number;
+  cover_image_id: number | null;
 }
 
 export interface ImageMeta {

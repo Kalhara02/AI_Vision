@@ -99,6 +99,7 @@ class ApiFlowTest(unittest.TestCase):
 
         p = c.get(f"/api/projects/{project['id']}").json()
         self.assertEqual((p["image_count"], p["done_count"]), (1, 1))
+        self.assertEqual((p["annotation_count"], p["cover_image_id"]), (2, image["id"]))
 
 
 if __name__ == "__main__":

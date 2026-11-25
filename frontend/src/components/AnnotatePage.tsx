@@ -18,8 +18,13 @@ import type {
 } from '../lib/types';
 import { useHistory } from '../lib/useHistory';
 import AnnotationCanvas, { type CanvasHandle, type NewShape } from './AnnotationCanvas';
+import { Icon, type IconName } from './Icons';
+import ModelChart from './ModelChart';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
+
+const TOOL_ICON: Record<Tool, IconName> = { select: 'cursor', bbox: 'box', polygon: 'polygon', smart: 'sparkle' };
+const TOOL_SHORT: Record<Tool, string> = { select: 'Edit', bbox: 'Box', polygon: 'Polygon', smart: 'Smart' };
 
 const TOOLS: { id: Tool; label: string; key: string }[] = [
   { id: 'select', label: 'Select / edit', key: 'V' },
@@ -515,43 +520,86 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   // ---------- render ----------
   if (error && !project) return <div className="page"><p className="error">{error}</p></div>;
 
-  const saveLabel = { saved: 'Saved', dirty: 'Unsaved changes', saving: 'Saving…', error: 'Save failed' }[saveState];
+  const saveLabel = { saved: 'Saved', dirty: 'Unsaved', saving: 'Saving…', error: 'Save failed' }[saveState];
+  const doneCount = images.filter((i) => i.status === 'done').length;
+  const hints: [string, string][] = (
+    {
+      select: [['Click', 'select'], ['Drag', 'move'], ['Handles', 'resize'], ['Del', 'delete'], ['Tab', 'next object']],
+      bbox: [['Drag', 'draw a box'], ['Esc', 'cancel'], ['1-9', 'class']],
+      polygon: [['Click', 'add point'], ['Enter', 'close'], ['Backspace', 'remove point'], ['Esc', 'cancel']],
+      smart: [['Click', 'object'], ['Right-click', 'background'], ['Drag', 'box prompt'], ['Enter', 'accept'], ['Esc', 'clear']],
+    } as Record<Tool, [string, string][]>
+  )[tool];
+  const proposalHints: [string, string][] = assisted && proposals.length ? [['Click dashed', 'accept'], ['A', 'accept all'], ['R', 'to polygons']] : [];
 
   return (
     <div className="annotate">
       <header className="topbar">
-        <a href={`#/projects/${projectId}`} className="back">← {project?.name ?? 'Project'}</a>
-        <button disabled={index <= 0} onClick={() => void goTo(images[index - 1]?.id)} title="Previous (←)">‹</button>
-        <span className="filename" title={meta?.filename}>
-          {index + 1}/{images.length} · {meta?.filename ?? '…'}
-        </span>
-        <button disabled={index < 0 || index >= images.length - 1} onClick={() => void goTo(images[index + 1]?.id)} title="Next (→)">›</button>
+        <a href={`#/projects/${projectId}`} className="back-btn" title="Back to project">
+          <Icon name="arrowLeft" size={16} />
+          <span>{project?.name ?? 'Project'}</span>
+        </a>
+        <div className="nav-group">
+          <button className="icon-btn" disabled={index <= 0} onClick={() => void goTo(images[index - 1]?.id)} title="Previous image (←)">
+            <Icon name="chevronLeft" />
+          </button>
+          <div className="img-pos">
+            <span className="filename" title={meta?.filename}>{meta?.filename ?? '…'}</span>
+            <div className="pos-row">
+              <span>{index + 1} / {images.length}</span>
+              <div className="mini-progress"><div style={{ width: `${images.length ? (100 * doneCount) / images.length : 0}%` }} /></div>
+              <span>{doneCount} done</span>
+            </div>
+          </div>
+          <button className="icon-btn" disabled={index < 0 || index >= images.length - 1} onClick={() => void goTo(images[index + 1]?.id)} title="Next image (→)">
+            <Icon name="chevronRight" />
+          </button>
+        </div>
         <span className={`status-pill ${meta?.status ?? ''}`}>{meta?.status?.replace('_', ' ')}</span>
         <span className="grow" />
-        <span className={`mode-pill ${logger.mode}`} title="Study mode (change on the project page)">{logger.mode}</span>
-        <span className={`save-state ${saveState}`}>{saveLabel}</span>
-        <button className="primary" onClick={() => void markDone()} title="Ctrl+Enter">Done ✓</button>
+        <span className={`mode-pill ${logger.mode}`} title="Session mode (change on the project page)">
+          <Icon name={assisted ? 'sparkle' : 'polygon'} size={14} /> {assisted ? 'AI assisted' : 'Manual'}
+        </span>
+        <span className={`save-state ${saveState}`}><span className="dot" />{saveLabel}</span>
+        <button className="primary" onClick={() => void markDone()} title="Mark done and go to the next image">
+          <Icon name="check" size={16} /> Done <span className="kbd on-primary">Ctrl+Enter</span>
+        </button>
       </header>
 
       {error && project && (
-        <div className="toast error" onClick={() => setError(null)}>{error} (click to dismiss)</div>
+        <div className="toast error" onClick={() => setError(null)}>
+          <Icon name="x" size={14} /> {error}
+        </div>
       )}
 
       <div className="annotate-body">
         <nav className="toolbar">
           {TOOLS.filter((t) => assisted || t.id !== 'smart').map((t) => (
-            <button key={t.id} className={tool === t.id ? 'active' : ''} onClick={() => setTool(t.id)} title={`${t.label} (${t.key})`}>
-              <span className="tool-icon">{{ select: '⬉', bbox: '▭', polygon: '⬠', smart: '✦' }[t.id]}</span>
-              <span className="kbd">{t.key}</span>
+            <button
+              key={t.id}
+              className={`tool-btn ${tool === t.id ? 'active' : ''} ${t.id === 'smart' ? 'ai' : ''}`}
+              onClick={() => setTool(t.id)}
+              title={`${t.label} (${t.key})`}
+            >
+              <Icon name={TOOL_ICON[t.id]} size={20} />
+              <span className="tool-label">{TOOL_SHORT[t.id]}</span>
+              <span className="tool-key">{t.key}</span>
             </button>
           ))}
-          <hr />
-          <button onClick={() => { history.undo(); logger.log('undo'); }} disabled={!history.canUndo} title="Undo (Ctrl+Z)">↶</button>
-          <button onClick={() => { history.redo(); logger.log('redo'); }} disabled={!history.canRedo} title="Redo (Ctrl+Shift+Z)">↷</button>
-          <hr />
-          <button onClick={() => canvasRef.current?.fit()} title="Fit (F)">⤢</button>
-          <button onClick={() => setHidden((h) => !h)} className={hidden ? 'active' : ''} title="Hide annotations (H)">◐</button>
-          <button onClick={() => setShowHelp(true)} title="Shortcuts (?)">?</button>
+          <div className="tool-sep" />
+          <button className="tool-btn small" onClick={() => { history.undo(); logger.log('undo'); }} disabled={!history.canUndo} title="Undo (Ctrl+Z)">
+            <Icon name="undo" />
+          </button>
+          <button className="tool-btn small" onClick={() => { history.redo(); logger.log('redo'); }} disabled={!history.canRedo} title="Redo (Ctrl+Shift+Z)">
+            <Icon name="redo" />
+          </button>
+          <div className="tool-sep" />
+          <button className="tool-btn small" onClick={() => canvasRef.current?.fit()} title="Fit to screen (F)"><Icon name="fit" /></button>
+          <button className={`tool-btn small ${hidden ? 'active' : ''}`} onClick={() => setHidden((h) => !h)} title="Hide annotations (H)">
+            <Icon name={hidden ? 'eyeOff' : 'eye'} />
+          </button>
+          <span className="grow" />
+          <button className="tool-btn small" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)"><Icon name="keyboard" /></button>
         </nav>
 
         <main className="stage-area">
@@ -581,7 +629,12 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
           ) : (
             <div className="canvas-loading">Loading…</div>
           )}
-          {aiBusy && <div className="ai-busy">{aiBusy}</div>}
+          {aiBusy && <div className="ai-busy"><span className="spinner" />{aiBusy}</div>}
+          <div className="hint-bar">
+            {[...hints, ...proposalHints].map(([k, d]) => (
+              <span key={k + d}><span className="kbd">{k}</span> {d}</span>
+            ))}
+          </div>
         </main>
 
         <aside className="panel">
@@ -602,86 +655,106 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
           </section>
 
           {assisted && (
-            <section className="ai-panel">
-              <h4>AI assistance</h4>
-              <div className="row-between small">
-                <span>Detector {modelVersion != null ? `v${modelVersion}` : '…'}{modelVersion === 0 ? ' (pretrained)' : ''}</span>
-                <span className="muted">{proposals.length} suggestions</span>
-              </div>
-              <div className="row">
-                <button onClick={acceptAll} disabled={!proposals.length} title="A">Accept all</button>
-                <button onClick={() => void refineBoxes()} disabled={!anns.some((a) => a.kind === 'bbox')} title="R">Boxes → polygons</button>
-              </div>
-              <label className="check small" title="Zooms SAM in on small objects (re-runs SAM on a window around the object)">
-                <input
-                  type="checkbox"
-                  checked={focusMode}
-                  onChange={(e) => {
-                    setFocusMode(e.target.checked);
-                    localStorage.setItem('labelloop.focus', e.target.checked ? 'on' : 'off');
-                    logger.log('focus_mode', { on: e.target.checked });
-                  }}
-                />
-                Smart tool focus mode (small objects)
-              </label>
-              <label className="small">
-                Confidence threshold {threshold.toFixed(2)}
-                <input
-                  type="range" min={0.1} max={0.9} step={0.05} value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  onMouseUp={() => {
-                    logger.log('threshold_change', { threshold: thresholdRef.current });
-                    void loadProposals(imageId, presentRef.current);
-                  }}
-                />
-              </label>
-              <div className="row">
-                <button className="primary" onClick={() => void retrain()} disabled={busy}>
-                  {model?.state === 'training' ? 'Training…' : 'Retrain now'}
-                </button>
-                <input type="number" min={1} max={50} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} title="epochs" style={{ width: 56 }} />
-              </div>
-              {busy && model && (
-                <div className="progress"><div className="progress-bar" style={{ width: `${Math.round(model.progress * 100)}%` }} /><span>{model.message}</span></div>
-              )}
-              {model?.state === 'error' && <p className="error small">{model.message}</p>}
-              {model?.state === 'idle' && model.message && <p className="muted small">{model.message}</p>}
-              <p className="muted small">Retrains automatically every 20 finished images; a new model is kept only if it beats the current one on held-out images.</p>
-              {!!model?.rounds.length && (
-                <table className="mini-table">
-                  <thead><tr><th>round</th><th>images</th><th>AP50 old → new</th><th></th></tr></thead>
-                  <tbody>
-                    {model.rounds.slice(-5).map((r) => (
-                      <tr key={r.round}>
-                        <td>{r.round}{r.trigger === 'auto' ? ' (auto)' : ''}</td>
-                        <td>{r.n_train}+{r.n_holdout}</td>
-                        <td>{r.ap50_new != null ? `${r.ap50_previous?.toFixed(2)} → ${r.ap50_new.toFixed(2)}` : 'n/a'}</td>
-                        <td>{r.accepted ? `v${r.version} ✓` : 'kept old'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              <div className="row-between small">
-                <span>Next image</span>
-                <div className="segmented mini">
-                  <button className={order === 'upload' ? 'active' : ''} onClick={() => setOrder('upload')}>in order</button>
-                  <button className={order === 'uncertainty' ? 'active' : ''} onClick={() => setOrder('uncertainty')}>most uncertain</button>
+            <>
+              <section className="ai-card">
+                <div className="ai-card-head">
+                  <span className="ai-card-title"><Icon name="zap" size={15} /> Suggestions</span>
+                  <span className={`count-badge ${proposals.length ? 'live' : ''}`}>{proposals.length}</span>
                 </div>
-              </div>
-              {order === 'uncertainty' && (
-                <div className="row-between small">
-                  <span className="muted">
-                    {model?.ranked_version != null ? `${model.n_ranked} images ranked by v${model.ranked_version}` : 'not ranked yet'}
+                <div className="muted small">
+                  Detector {modelVersion != null ? `v${modelVersion}` : '…'}{modelVersion === 0 ? ' · pretrained on COCO' : ' · trained on your labels'}
+                </div>
+                <div className="row">
+                  <button onClick={acceptAll} disabled={!proposals.length} title="Accept all suggestions (A)">
+                    <Icon name="check" size={15} /> Accept all <span className="kbd">A</span>
+                  </button>
+                  <button onClick={() => void refineBoxes()} disabled={!anns.some((a) => a.kind === 'bbox')} title="Turn boxes into polygons with SAM (R)">
+                    <Icon name="polygon" size={15} /> To polygons <span className="kbd">R</span>
+                  </button>
+                </div>
+                <label className="slider-label small">
+                  <span className="row-between"><span>Confidence threshold</span><b>{threshold.toFixed(2)}</b></span>
+                  <input
+                    type="range" min={0.1} max={0.9} step={0.05} value={threshold}
+                    onChange={(e) => setThreshold(Number(e.target.value))}
+                    onMouseUp={() => {
+                      logger.log('threshold_change', { threshold: thresholdRef.current });
+                      void loadProposals(imageId, presentRef.current);
+                    }}
+                  />
+                </label>
+              </section>
+
+              <section className="ai-card">
+                <div className="ai-card-head">
+                  <span className="ai-card-title"><Icon name="sparkle" size={15} /> Smart tool</span>
+                  <span className="muted small">SAM 2.1</span>
+                </div>
+                <label className="switch-row small" title="Re-runs SAM on a zoomed window around small objects">
+                  <span>
+                    <b>Focus mode</b>
+                    <span className="muted"> · zooms in on small objects</span>
                   </span>
-                  <button onClick={() => void rank()} disabled={busy}>Rank now</button>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={focusMode}
+                    onChange={(e) => {
+                      setFocusMode(e.target.checked);
+                      localStorage.setItem('labelloop.focus', e.target.checked ? 'on' : 'off');
+                      logger.log('focus_mode', { on: e.target.checked });
+                    }}
+                  />
+                </label>
+                <div className="muted small">Press <span className="kbd">S</span>, click an object, right-click background, Enter to accept.</div>
+              </section>
+
+              <section className="ai-card">
+                <div className="ai-card-head">
+                  <span className="ai-card-title"><Icon name="cpu" size={15} /> Model</span>
+                  <span className={`version-badge ${busy ? 'busy' : ''}`}>{busy ? (model?.state === 'scoring' ? 'ranking' : 'training') : `v${model?.version ?? 0}`}</span>
                 </div>
-              )}
-            </section>
+                {busy && model && (
+                  <div className="progress">
+                    <div className="progress-bar" style={{ width: `${Math.round(model.progress * 100)}%` }} />
+                    <span>{model.message}</span>
+                  </div>
+                )}
+                {model?.state === 'error' && <p className="error small">{model.message}</p>}
+                {model?.state === 'idle' && model.message && <p className="muted small">{model.message}</p>}
+                {model && model.rounds.length > 0 && <ModelChart rounds={model.rounds} />}
+                <div className="row">
+                  <button className="primary" onClick={() => void retrain()} disabled={busy}>
+                    <Icon name="loop" size={15} /> {model?.state === 'training' ? 'Training…' : 'Retrain now'}
+                  </button>
+                  <label className="epochs" title="Training epochs for this round">
+                    <input type="number" min={1} max={50} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} />
+                    <span className="muted small">epochs</span>
+                  </label>
+                </div>
+                <p className="muted small">Retrains every 20 finished images. A new model replaces the old one only if it scores better on held-out images.</p>
+                <div className="row-between small">
+                  <span><Icon name="shuffle" size={14} /> Next image</span>
+                  <div className="segmented mini">
+                    <button className={order === 'upload' ? 'active' : ''} onClick={() => setOrder('upload')}>in order</button>
+                    <button className={order === 'uncertainty' ? 'active' : ''} onClick={() => setOrder('uncertainty')}>most uncertain</button>
+                  </div>
+                </div>
+                {order === 'uncertainty' && (
+                  <div className="row-between small">
+                    <span className="muted">
+                      {model?.ranked_version != null ? `${model.n_ranked} images ranked by v${model.ranked_version}` : 'Not ranked yet'}
+                    </span>
+                    <button onClick={() => void rank()} disabled={busy}>Rank now</button>
+                  </div>
+                )}
+              </section>
+            </>
           )}
 
           <section className="grow-section">
-            <h4>Objects ({anns.length})</h4>
+            <h4>Objects <span className="count">{anns.length}</span></h4>
+            {anns.length === 0 && <p className="muted small">No objects yet.</p>}
             <ul className="ann-list">
               {anns.map((a, i) => (
                 <li
@@ -693,16 +766,12 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                   }}
                 >
                   <span className="swatch" style={{ background: classMap.get(a.class_id)?.color }} />
-                  <span className="muted small">{i + 1}</span>
-                  <select
-                    value={a.class_id}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => relabel(a.uid, Number(e.target.value))}
-                  >
+                  <span className="muted small idx">{i + 1}</span>
+                  <select value={a.class_id} onClick={(e) => e.stopPropagation()} onChange={(e) => relabel(a.uid, Number(e.target.value))}>
                     {project?.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  <span className="muted small" title={a.kind}>{a.kind === 'bbox' ? '▭' : '⬠'}</span>
-                  {a.source !== 'manual' && <span className="ai-badge" title={`proposed by ${a.source}`}>AI</span>}
+                  <span className="muted" title={a.kind}><Icon name={a.kind === 'bbox' ? 'box' : 'polygon'} size={14} /></span>
+                  {a.source !== 'manual' && <span className={`ai-badge ${a.source}`} title={`made with ${a.source === 'sam' ? 'SAM' : 'the detector'}`}>{a.source === 'sam' ? 'SAM' : 'DET'}</span>}
                   <button
                     className="icon"
                     title="Delete"
@@ -711,7 +780,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                       remove(a.uid);
                     }}
                   >
-                    ✕
+                    <Icon name="x" size={14} />
                   </button>
                 </li>
               ))}
@@ -723,7 +792,10 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
       {showHelp && (
         <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Keyboard shortcuts</h3>
+            <div className="card-head">
+              <h3><Icon name="keyboard" /> Keyboard shortcuts</h3>
+              <button className="icon" onClick={() => setShowHelp(false)}><Icon name="x" /></button>
+            </div>
             <table>
               <tbody>
                 {SHORTCUTS.map(([k, d]) => (
@@ -731,7 +803,6 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                 ))}
               </tbody>
             </table>
-            <button onClick={() => setShowHelp(false)}>Close</button>
           </div>
         </div>
       )}

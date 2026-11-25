@@ -44,6 +44,8 @@ class ProjectOut(BaseModel):
     classes: list[ClassOut]
     image_count: int = 0
     done_count: int = 0
+    annotation_count: int = 0
+    cover_image_id: int | None = None
 
 
 # ---------- images ----------
