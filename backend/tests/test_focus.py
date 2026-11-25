@@ -117,3 +117,25 @@ class SegmentTest(unittest.TestCase):
         self.s._predictor = Big()
         r = self.s.segment("a", self.img, [[300, 200, 1]], focus=True)
         self.assertIsNone(r["window"])
+
+
+class HybridTest(SegmentTest):
+    def test_first_click_is_plain(self):
+        r = self.s.segment("a", self.img, [[300, 200, 1]], mode="hybrid")
+        self.assertIsNone(r["window"])
+
+    def test_correction_click_uses_window(self):
+        r1 = self.s.segment("a", self.img, [[300, 200, 1]], mode="hybrid")
+        r2 = self.s.segment("a", self.img, [[300, 200, 1], [306, 204, 0]], mode="hybrid", prev=r1)
+        self.assertIsNotNone(r2["window"])
+        cx, cy = self.centroid(r2["mask"])
+        self.assertAlmostEqual(cx, 300, delta=0.5)
+        self.assertAlmostEqual(cy, 200, delta=0.5)
+
+    def test_box_stays_plain(self):
+        r = self.s.segment("a", self.img, [], box=[100, 120, 20, 20], mode="hybrid")
+        self.assertIsNone(r["window"])
+
+    def test_unknown_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            self.s.segment("a", self.img, [[1, 1, 1]], mode="zoom")

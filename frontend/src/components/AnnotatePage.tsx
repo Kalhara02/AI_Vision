@@ -12,6 +12,7 @@ import type {
   Project,
   Proposal,
   Pt,
+  SamMode,
   SmartPoint,
   Source,
   Tool,
@@ -82,7 +83,15 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [epochs, setEpochs] = useState(10);
   const samReq = useRef(0);
-  const [focusMode, setFocusMode] = useState(() => localStorage.getItem('labelloop.focus') !== 'off');
+  const [samMode, setSamModeState] = useState<SamMode>(() => {
+    const m = localStorage.getItem('labelloop.samMode');
+    return m === 'focus' || m === 'hybrid' ? m : 'plain';
+  });
+  const setSamMode = (m: SamMode) => {
+    setSamModeState(m);
+    localStorage.setItem('labelloop.samMode', m);
+    logger.log('sam_mode', { mode: m });
+  };
   const thresholdRef = useRef(threshold);
   thresholdRef.current = threshold;
 
@@ -286,11 +295,11 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
     const t0 = performance.now();
     setAiBusy('SAM…');
     try {
-      const r = await api.samPredict(imageId, points, box, focusMode);
+      const r = await api.samPredict(imageId, points, box, samMode);
       if (req !== samReq.current) return; // a newer click already went out
       setSmartPreview(r.points);
       logger.log('sam_predict', {
-        n_points: points.length, box: !!box, score: r.score, focus: focusMode, focus_used: !!r.focus_window,
+        n_points: points.length, box: !!box, score: r.score, sam_mode: samMode, focus_used: !!r.focus_window,
         latency_ms: Math.round(performance.now() - t0), encode_ms: r.encode_ms, decode_ms: r.decode_ms,
       });
     } catch (e) {
@@ -317,7 +326,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const acceptSmart = () => {
     if (!smartPreview || smartPreview.length < 3) return false;
     create({ kind: 'polygon', points: smartPreview, bbox: bboxFromPoints(smartPreview) }, 'sam');
-    logger.log('sam_accept', { clicks: smartPoints.length, box: !!smartBox, focus: focusMode });
+    logger.log('sam_accept', { clicks: smartPoints.length, box: !!smartBox, sam_mode: samMode });
     clearSmart();
     return true;
   };
@@ -690,22 +699,16 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                   <span className="ai-card-title"><Icon name="sparkle" size={15} /> Smart tool</span>
                   <span className="muted small">SAM 2.1</span>
                 </div>
-                <label className="switch-row small" title="Re-runs SAM on a zoomed window around small objects">
-                  <span>
-                    <b>Focus mode</b>
-                    <span className="muted"> · zooms in on small objects</span>
+                <div className="row-between small">
+                  <span title="Plain: SAM sees the whole image. Focus: SAM re-runs on a zoomed window around small objects. Hybrid: first click plain, corrections zoomed.">
+                    Mode
                   </span>
-                  <input
-                    type="checkbox"
-                    className="switch"
-                    checked={focusMode}
-                    onChange={(e) => {
-                      setFocusMode(e.target.checked);
-                      localStorage.setItem('labelloop.focus', e.target.checked ? 'on' : 'off');
-                      logger.log('focus_mode', { on: e.target.checked });
-                    }}
-                  />
-                </label>
+                  <div className="segmented mini">
+                    {(['plain', 'focus', 'hybrid'] as SamMode[]).map((m) => (
+                      <button key={m} className={samMode === m ? 'active' : ''} onClick={() => setSamMode(m)}>{m}</button>
+                    ))}
+                  </div>
+                </div>
                 <div className="muted small">Press <span className="kbd">S</span>, click an object, right-click background, Enter to accept.</div>
               </section>
 

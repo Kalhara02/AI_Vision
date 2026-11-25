@@ -99,3 +99,6 @@ export interface Insights {
 
 /** A SAM click: [x, y, 1 = object | 0 = background] */
 export type SmartPoint = [number, number, 0 | 1];
+
+/** How the Smart tool runs SAM: whole image, zoomed window, or plain first click + zoomed corrections. */
+export type SamMode = 'plain' | 'focus' | 'hybrid';

@@ -1,4 +1,4 @@
-import type { AnnotationDTO, BBox, ImageMeta, ImageStatus, Insights, LabelClass, ModelStatus, Project, Pt, SmartPoint } from './types';
+import type { AnnotationDTO, BBox, ImageMeta, ImageStatus, Insights, LabelClass, ModelStatus, Project, Pt, SamMode, SmartPoint } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -71,14 +71,14 @@ export const api = {
   // ---------- AI assistance ----------
   aiStatus: () => request<{ enabled: boolean; device?: string; reason?: string }>('/api/ai/status'),
   samPrepare: (imageId: number) => request<{ encode_ms: number }>(`/api/images/${imageId}/sam/prepare`, { method: 'POST' }),
-  samPredict: (imageId: number, points: SmartPoint[], box: BBox | null, focus: boolean) =>
+  samPredict: (imageId: number, points: SmartPoint[], box: BBox | null, mode: SamMode) =>
     request<{
       points: Pt[] | null;
       score: number;
       focus_window: [number, number, number, number] | null;
       encode_ms: number;
       decode_ms: number;
-    }>(`/api/images/${imageId}/sam/predict`, json('POST', { points, box, focus })),
+    }>(`/api/images/${imageId}/sam/predict`, json('POST', { points, box, mode })),
   samBoxes: (imageId: number, boxes: BBox[]) =>
     request<{ polygons: (Pt[] | null)[]; scores: number[] }>(`/api/images/${imageId}/sam/boxes`, json('POST', { boxes })),
   proposals: (imageId: number, threshold: number) =>

@@ -11,6 +11,10 @@ object size. That window is upscaled to 1024 px, so the object fills SAM's
 view. The window is fixed by the first click (or the box) and is cached, so
 further clicks on the same object reuse its encoding and the previous mask.
 
+Hybrid mode (added after evaluating both): plain for the first click, which plain
+does best, then the focus window for every correction click, where zooming in
+helps. A box prompt stays plain.
+
 Library: the official `sam2` package (facebookresearch/sam2). Weights come from
 the Hugging Face Hub on first use (cached in HF_HOME, the data volume).
 """
@@ -38,6 +42,7 @@ FOCUS_MIN_SIDE = 96
 FOCUS_MAX_SIDE = 384
 FOCUS_POINT_MARGIN = 16  # every click stays at least this far inside the window
 FOCUS_GRID = 16  # window corners snap to this grid, so small changes reuse the cache
+MODES = ("plain", "focus", "hybrid")
 
 
 class SamUnavailable(RuntimeError):
@@ -150,7 +155,7 @@ class SamService:
 
     # ---------------------------------------------------------------- core
     def segment(self, key: str, image: np.ndarray, points: list[list[float]], box: list[float] | None = None,
-                focus: bool = False, prev: dict | None = None) -> dict:
+                focus: bool = False, prev: dict | None = None, mode: str | None = None) -> dict:
         """Segment one object. points: [[x, y, 1|0], ...]; box: [x, y, w, h].
 
         `prev` is the result of the previous call for the same object; its mask logits are fed
@@ -163,6 +168,12 @@ class SamService:
         box_xyxy = np.array([box[0], box[1], box[0] + box[2], box[1] + box[3]], np.float32) if box else None
         enc = self._ensure(key, image)
         t0 = time.perf_counter()
+
+        mode = mode or ("focus" if focus else "plain")
+        if mode not in MODES:
+            raise ValueError(f"unknown SAM mode {mode}")
+        # hybrid: the first click (or a box) is plain, every correction click uses the focus window
+        focus = mode == "focus" or (mode == "hybrid" and box_xyxy is None and len(points) > 1)
 
         window = None
         if focus:
@@ -206,9 +217,9 @@ class SamService:
             return self._ensure(key, self.image(key, path))
 
     def predict(self, key: str, path: Path, points: list[list[float]], box: list[float] | None = None,
-                focus: bool = False) -> dict:
+                focus: bool = False, mode: str | None = None) -> dict:
         with self._lock:
-            r = self.segment(key, self.image(key, path), points, box, focus)
+            r = self.segment(key, self.image(key, path), points, box, focus, mode=mode)
         return {"points": mask_to_polygon(r["mask"]), "score": r["score"], "focus_window": r["window"],
                 "encode_ms": r["encode_ms"], "decode_ms": r["decode_ms"]}
 

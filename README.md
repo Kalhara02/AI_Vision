@@ -11,6 +11,9 @@ Two models help while labeling, both running locally in our own code:
 - **Focus mode** (our addition for small objects): SAM resizes every input to 1024 px, so a 20 px apple
   stays tiny. After the first click we re-run SAM on a window about 3x the object's size, cached per
   object, so the apple fills SAM's view. Evaluated against plain SAM in `eval/sam_noc.py`.
+- **Hybrid mode**: the evaluation showed plain SAM gives the better first click while focus mode
+  halves the apples that never reach 80% IoU, so hybrid uses plain for the first click and the focus
+  window for corrections. The default mode is chosen on the validation split, results are reported on test.
 - **Faster R-CNN** (pre-labels): suggestions appear when an image opens. Round 0 uses the
   COCO-pretrained "apple" class. Every 20 finished images (or on **Retrain now**) it is fine-tuned
   on the user's corrected labels with our own training loop, so suggestions improve as the user works.

@@ -1,4 +1,4 @@
-"""Interactive segmentation quality of SAM 2.1 on apples: plain vs. focus mode (NoC protocol).
+"""Interactive segmentation quality of SAM 2.1 on apples: plain vs. focus vs. hybrid (NoC protocol).
 
 Uses exactly the app's code path (app/ml/sam.py, SamService.segment), so the
 numbers describe the tool, not a separate script.
@@ -13,8 +13,11 @@ failure penalty), mean IoU after k clicks, and IoU from a box prompt (the
 detector -> SAM path), per mode and per apple size.
 
     docker compose run --rm backend python eval/sam_noc.py --max-objects 400
+    docker compose run --rm backend python eval/sam_noc.py --split val --modes plain focus hybrid --max-objects 300
+    docker compose run --rm backend python eval/sam_noc.py --modes hybrid --max-objects 400   # adds to test results
 
-Writes: eval/results/sam_noc_objects.csv, sam_noc_summary.json, sam_miou_curve.png
+Writes (test split): eval/results/sam_noc_objects.csv, sam_noc_summary.json, sam_miou_curve.png
+Other splits get a suffix, e.g. sam_noc_summary_val.json. Results of modes not rerun are kept (merged).
 """
 from __future__ import annotations
 
@@ -50,12 +53,12 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.logical_and(a, b).sum() / u) if u else 0.0
 
 
-def run_object(sam, key, image, gt, focus: bool, max_clicks: int) -> tuple[list[float], float, float]:
+def run_object(sam, key, image, gt, mode: str, max_clicks: int) -> tuple[list[float], float, float]:
     pred = np.zeros_like(gt)
     clicks, ious, prev, t0 = [], [], None, time.perf_counter()
     for _ in range(max_clicks):
         clicks.append(next_click(gt, pred))
-        prev = sam.segment(key, image, clicks, focus=focus, prev=prev)
+        prev = sam.segment(key, image, clicks, prev=prev, mode=mode)
         pred = prev["mask"]
         ious.append(iou(pred, gt))
         if ious[-1] >= max(THRESHOLDS):  # every threshold reached: later clicks would not count
@@ -64,7 +67,7 @@ def run_object(sam, key, image, gt, focus: bool, max_clicks: int) -> tuple[list[
     ms_per_click = (time.perf_counter() - t0) * 1000 / len(clicks)
     ys, xs = np.nonzero(gt)
     box = [float(xs.min()), float(ys.min()), float(xs.max() + 1 - xs.min()), float(ys.max() + 1 - ys.min())]
-    box_iou = iou(sam.segment(key, image, [], box=box, focus=focus)["mask"], gt)
+    box_iou = iou(sam.segment(key, image, [], box=box, mode=mode)["mask"], gt)
     return ious, box_iou, ms_per_click
 
 
@@ -90,7 +93,7 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/minneapple"))
     ap.add_argument("--split", default="test")
     ap.add_argument("--model", default="facebook/sam2.1-hiera-tiny")
-    ap.add_argument("--modes", nargs="+", default=["plain", "focus"], choices=["plain", "focus"])
+    ap.add_argument("--modes", nargs="+", default=["plain", "focus"], choices=["plain", "focus", "hybrid"])
     ap.add_argument("--max-clicks", type=int, default=20)
     ap.add_argument("--max-objects", type=int, default=400, help="random sample of apples (0 = all)")
     ap.add_argument("--include-truncated", action="store_true", help="also apples cut by the crop border")
@@ -123,7 +126,7 @@ def main():
         if not gt.any():
             continue
         for mode in args.modes:
-            ious, box_iou, ms = run_object(sam, f"crop{im['id']}", image, gt, mode == "focus", args.max_clicks)
+            ious, box_iou, ms = run_object(sam, f"crop{im['id']}", image, gt, mode, args.max_clicks)
             row = {"mode": mode, "image": im["file_name"], "instance_id": a["attributes"]["instance_id"],
                    "area": int(gt.sum()), "size": size_bucket(gt.sum()),
                    "iou1": round(ious[0], 4), "iou3": round(ious[2], 4), "iou5": round(ious[4], 4),
@@ -136,23 +139,35 @@ def main():
             print(f"{n + 1}/{len(objects)} apples  {time.time() - t_start:.0f} s")
 
     out = results_dir()
-    with open(out / "sam_noc_objects.csv", "w", newline="") as f:
-        cols = [c for c in rows[0] if c != "ious"]
+    suffix = "" if args.split == "test" else f"_{args.split}"
+    csv_path = out / f"sam_noc_objects{suffix}.csv"
+    json_path = out / f"sam_noc_summary{suffix}.json"
+    cols = [c for c in rows[0] if c != "ious"]
+    kept = []
+    if csv_path.exists():  # keep rows of modes that were not rerun now
+        with open(csv_path) as f:
+            kept = [r for r in csv.DictReader(f) if r.get("mode") not in args.modes]
+    with open(csv_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
+        w.writerows(kept)
         w.writerows(rows)
 
-    summary = {"model": args.model, "device": sam.device, "max_clicks": args.max_clicks, "modes": {}}
+    summary = {"model": args.model, "device": sam.device, "max_clicks": args.max_clicks, "split": args.split, "modes": {}}
+    if json_path.exists():
+        old = json.loads(json_path.read_text())
+        summary["modes"] = {m: v for m, v in old.get("modes", {}).items() if m not in args.modes}
     for mode in args.modes:
         rs = [r for r in rows if r["mode"] == mode]
         summary["modes"][mode] = {"all": summarize(rs, args.max_clicks)}
         for b in ("small", "medium", "large"):
             summary["modes"][mode][b] = summarize([r for r in rs if r["size"] == b], args.max_clicks)
-    (out / "sam_noc_summary.json").write_text(json.dumps(summary, indent=1))
+    json_path.write_text(json.dumps(summary, indent=1))
+    all_modes = [m for m in ("plain", "focus", "hybrid") if m in summary["modes"]]
 
     print("\n| mode | apples | NoC@80 | NoC@85 | NoC@90 | mIoU@1 | mIoU@3 | mIoU@5 | box prompt IoU | ms / click |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-    for mode in args.modes:
+    for mode in all_modes:
         s = summary["modes"][mode]["all"]
         print(f"| {mode} | {s['n']} | {s['NoC@80']} | {s['NoC@85']} | {s['NoC@90']} | {s['mIoU@1']} | "
               f"{s['mIoU@3']} | {s['mIoU@5']} | {s['box_prompt_mIoU']} | {s['ms_per_click']} |")
@@ -162,8 +177,8 @@ def main():
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.5, 4))
-    styles = {"plain": "--", "focus": "-"}
-    for mode in args.modes:
+    styles = {"plain": "--", "focus": ":", "hybrid": "-"}
+    for mode in all_modes:
         for size, marker in (("all", "o"), ("small", ".")):
             s = summary["modes"][mode].get(size)
             if s:
@@ -178,7 +193,8 @@ def main():
     ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "sam_miou_curve.png", dpi=160)
+    ax.set_title(f"SAM 2.1 tiny, {args.split} crops")
+    fig.savefig(out / f"sam_miou_curve{suffix}.png", dpi=160)
 
 
 if __name__ == "__main__":

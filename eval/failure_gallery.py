@@ -46,7 +46,7 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/minneapple"))
     ap.add_argument("--detections", type=Path, help="detections_n<k>.json from detector_curve.py")
     ap.add_argument("--n", type=int, default=8)
-    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus"])
+    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus", "hybrid"])
     args = ap.parse_args()
     out = results_dir()
     coco = load_coco(args.data / "coco_crops_test.json")

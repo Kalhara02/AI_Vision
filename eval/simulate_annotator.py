@@ -92,7 +92,7 @@ def main():
     ap.add_argument("--logs", type=Path, help="user-study logs to calibrate action costs")
     ap.add_argument("--epsilon", type=float, default=2.0, help="polygon simplification for manual vertex count (px)")
     ap.add_argument("--max-images", type=int, default=0)
-    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus"],
+    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus", "hybrid"],
                     help="which SAM mode's clicks to use from sam_noc_objects.csv (the app uses focus)")
     args = ap.parse_args()
     out = results_dir()
