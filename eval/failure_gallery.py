@@ -46,6 +46,7 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/minneapple"))
     ap.add_argument("--detections", type=Path, help="detections_n<k>.json from detector_curve.py")
     ap.add_argument("--n", type=int, default=8)
+    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus"])
     args = ap.parse_args()
     out = results_dir()
     coco = load_coco(args.data / "coco_crops_test.json")
@@ -55,7 +56,8 @@ def main():
 
     sam_csv = out / "sam_noc_objects.csv"
     if sam_csv.exists():
-        rows = sorted(csv.DictReader(open(sam_csv)), key=lambda r: float(r["iou5"]))[: args.n]
+        rows = [r for r in csv.DictReader(open(sam_csv)) if r.get("mode", args.sam_mode) == args.sam_mode]
+        rows = sorted(rows, key=lambda r: float(r["iou5"]))[: args.n]
         tiles = []
         for r in rows:
             im = by_name[r["image"]]

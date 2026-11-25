@@ -92,6 +92,8 @@ def main():
     ap.add_argument("--logs", type=Path, help="user-study logs to calibrate action costs")
     ap.add_argument("--epsilon", type=float, default=2.0, help="polygon simplification for manual vertex count (px)")
     ap.add_argument("--max-images", type=int, default=0)
+    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus"],
+                    help="which SAM mode's clicks to use from sam_noc_objects.csv (the app uses focus)")
     args = ap.parse_args()
     out = results_dir()
 
@@ -112,6 +114,8 @@ def main():
     sam_csv = out / "sam_noc_objects.csv"
     if sam_csv.exists():
         for r in csv.DictReader(open(sam_csv)):
+            if r.get("mode", args.sam_mode) != args.sam_mode:
+                continue
             noc[(r["image"], int(r["instance_id"]))] = int(r["noc85"])
             box_iou[(r["image"], int(r["instance_id"]))] = float(r["box_iou"])
     else:

@@ -71,11 +71,14 @@ export const api = {
   // ---------- AI assistance ----------
   aiStatus: () => request<{ enabled: boolean; device?: string; reason?: string }>('/api/ai/status'),
   samPrepare: (imageId: number) => request<{ encode_ms: number }>(`/api/images/${imageId}/sam/prepare`, { method: 'POST' }),
-  samPredict: (imageId: number, points: SmartPoint[], box: BBox | null) =>
-    request<{ points: Pt[] | null; score: number; encode_ms: number; decode_ms: number }>(
-      `/api/images/${imageId}/sam/predict`,
-      json('POST', { points, box }),
-    ),
+  samPredict: (imageId: number, points: SmartPoint[], box: BBox | null, focus: boolean) =>
+    request<{
+      points: Pt[] | null;
+      score: number;
+      focus_window: [number, number, number, number] | null;
+      encode_ms: number;
+      decode_ms: number;
+    }>(`/api/images/${imageId}/sam/predict`, json('POST', { points, box, focus })),
   samBoxes: (imageId: number, boxes: BBox[]) =>
     request<{ polygons: (Pt[] | null)[]; scores: number[] }>(`/api/images/${imageId}/sam/boxes`, json('POST', { boxes })),
   proposals: (imageId: number, threshold: number) =>

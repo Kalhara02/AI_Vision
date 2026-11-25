@@ -8,6 +8,9 @@ Two models help while labeling, both running locally in our own code:
 
 - **SAM 2.1** (click-to-segment): click an apple, get its outline; right-click to remove
   background; drag a box for a box prompt. Also turns detector boxes into polygons in one batch.
+- **Focus mode** (our addition for small objects): SAM resizes every input to 1024 px, so a 20 px apple
+  stays tiny. After the first click we re-run SAM on a window about 3x the object's size, cached per
+  object, so the apple fills SAM's view. Evaluated against plain SAM in `eval/sam_noc.py`.
 - **Faster R-CNN** (pre-labels): suggestions appear when an image opens. Round 0 uses the
   COCO-pretrained "apple" class. Every 20 finished images (or on **Retrain now**) it is fine-tuned
   on the user's corrected labels with our own training loop, so suggestions improve as the user works.
@@ -140,7 +143,7 @@ forked or wrapped, and no model is called through a hosted API.
 | REST API, data model, image ingestion | FastAPI, SQLAlchemy, Pydantic, PostgreSQL, Pillow, NumPy |
 | COCO / YOLO / VOC exporters | Python standard library |
 | Interaction logger and effort metrics | |
-| SAM integration: encoder cache, click/box prompting, mask to polygon, batch box refinement | SAM 2.1 (`sam2` package, Meta), pretrained `sam2.1-hiera-tiny` |
+| SAM integration: encoder cache, click/box prompting, focus mode for small objects, mask to polygon, batch box refinement | SAM 2.1 (`sam2` package, Meta), pretrained `sam2.1-hiera-tiny` |
 | Detector service, cold start via COCO "apple", fine-tuning loop (data, augmentation, optimiser, schedule, versioning) | torchvision Faster R-CNN ResNet-50 FPN v2, COCO weights, PyTorch |
 | Training rounds: auto trigger, hold-out guard, AP50 metric, uncertainty ranking (`app/ml/metrics.py`), next-image queue | NumPy |
 | Effort analytics shared by the app and the report (`app/analytics.py`) | NumPy |
@@ -184,4 +187,5 @@ docker-compose.yml
 - Faster R-CNN: S. Ren, K. He, R. Girshick, J. Sun. NeurIPS 2015. torchvision v2 weights: Y. Li et al., 2021.
 - COCO: T.-Y. Lin et al. Microsoft COCO: Common Objects in Context. ECCV 2014.
 - Active learning: B. Settles. Active Learning Literature Survey. University of Wisconsin-Madison, TR 1648, 2009.
+- Focus view idea: X. Chen et al. FocalClick: Towards Practical Interactive Image Segmentation. CVPR 2022.
 - NoC protocol: K. Sofiiuk, I. Petrov, A. Konushin. Reviving Iterative Training with Mask Guidance for Interactive Segmentation (RITM). ICIP 2022.

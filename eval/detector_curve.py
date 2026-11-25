@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-test", type=int, default=0, help="limit test crops (0 = all), for a quick run")
+    ap.add_argument("--fresh", action="store_true",
+                    help="ignore results already in detector_curve.csv (default: keep them and skip those sizes)")
     args = ap.parse_args()
 
     from app.ml.detector import Sample, TrainConfig, build_pretrained, detect, device, train_detector
@@ -68,8 +70,20 @@ def main():
     rng.shuffle(pool_samples)
     test_imgs = {im["id"]: load_rgb(test_dir / im["file_name"]) for im in test_images}
 
+    csv_path = out / "detector_curve.csv"
     rows = []
+    if csv_path.exists() and not args.fresh and not args.max_test:
+        with open(csv_path) as f:
+            rows = [{k: (float(v) if k not in ("n_train_images",) else int(v)) for k, v in r.items()}
+                    for r in csv.DictReader(f)]
+        done = sorted(r["n_train_images"] for r in rows)
+        print(f"resuming: keeping results for n = {done} from {csv_path.name}")
+    done_sizes = {r["n_train_images"] for r in rows}
+
     for n in args.sizes:
+        if n in done_sizes:
+            print(f"skip n={n}: already done")
+            continue
         t0 = time.time()
         if n == 0:
             model, label = build_pretrained()
@@ -90,8 +104,9 @@ def main():
         row = {"n_train_images": n, **{k: round(v, 4) for k, v in m.items()},
                "train_seconds": meta["train_seconds"], "total_seconds": round(time.time() - t0, 1)}
         rows.append(row)
+        rows.sort(key=lambda r: r["n_train_images"])
         print(row)
-        with open(out / "detector_curve.csv", "w", newline="") as f:  # rewrite after each step
+        with open(csv_path, "w", newline="") as f:  # rewrite after each size, so an interruption loses little
             w = csv.DictWriter(f, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)

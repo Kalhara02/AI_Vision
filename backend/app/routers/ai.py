@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api", tags=["ai"])
 class SamPredictIn(BaseModel):
     points: list[list[float]] = Field(default_factory=list, max_length=50)  # [x, y, 1|0]
     box: list[float] | None = None  # [x, y, w, h]
+    focus: bool = True  # zoom in on small objects (see app/ml/sam.py)
 
 
 class SamBoxesIn(BaseModel):
@@ -82,7 +83,8 @@ def sam_predict(image_id: int, body: SamPredictIn, db: Session = Depends(get_db)
     sam, Unavailable = _sam()
     image = _image(db, image_id)
     try:
-        res = sam.predict(str(image_id), storage.image_path(image.stored_name), body.points, body.box)
+        res = sam.predict(str(image_id), storage.image_path(image.stored_name), body.points, body.box,
+                          focus=body.focus)
     except Unavailable as exc:
         raise HTTPException(503, str(exc))
     if res["points"]:

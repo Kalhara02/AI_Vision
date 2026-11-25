@@ -8,7 +8,7 @@ Prepare the data first with `make data ...` (see `scripts/README.md`).
 | --- | --- | --- |
 | `make eval-quick` | smoke test, a few minutes | checks that models load and scripts run |
 | `make eval-detector` | box AP on test crops: pretrained COCO "apple" vs. our fine-tuning on 25/50/100/200 crops | `detector_curve.csv/.png` |
-| `make eval-sam` | SAM 2.1 NoC@85/90, mIoU after k clicks, box-prompt IoU, by apple size | `sam_noc_summary.json`, `sam_miou_curve.png` |
+| `make eval-sam` | SAM 2.1 plain vs. focus mode: NoC@80/85/90, mIoU after k clicks, box-prompt IoU, ms per click, by apple size | `sam_noc_summary.json`, `sam_miou_curve.png` |
 | `make eval-failures` | worst SAM cases, detector misses and false alarms | `failures_sam.png`, `failures_detector.png` |
 | `make eval-sim` | simulated annotator: seconds per crop for manual, SAM only, detector+SAM (pretrained vs. fine-tuned); action costs calibrated from your logs if `data/logs.json` exists | `simulated_effort.json/.png` |
 | `make eval-al` | active learning: uncertainty vs. random sampling over 4 rounds | `active_learning.csv/.png` |

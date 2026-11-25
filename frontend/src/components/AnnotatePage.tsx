@@ -77,6 +77,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [epochs, setEpochs] = useState(10);
   const samReq = useRef(0);
+  const [focusMode, setFocusMode] = useState(() => localStorage.getItem('labelloop.focus') !== 'off');
   const thresholdRef = useRef(threshold);
   thresholdRef.current = threshold;
 
@@ -280,11 +281,11 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
     const t0 = performance.now();
     setAiBusy('SAM…');
     try {
-      const r = await api.samPredict(imageId, points, box);
+      const r = await api.samPredict(imageId, points, box, focusMode);
       if (req !== samReq.current) return; // a newer click already went out
       setSmartPreview(r.points);
       logger.log('sam_predict', {
-        n_points: points.length, box: !!box, score: r.score,
+        n_points: points.length, box: !!box, score: r.score, focus: focusMode, focus_used: !!r.focus_window,
         latency_ms: Math.round(performance.now() - t0), encode_ms: r.encode_ms, decode_ms: r.decode_ms,
       });
     } catch (e) {
@@ -311,7 +312,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const acceptSmart = () => {
     if (!smartPreview || smartPreview.length < 3) return false;
     create({ kind: 'polygon', points: smartPreview, bbox: bboxFromPoints(smartPreview) }, 'sam');
-    logger.log('sam_accept', { clicks: smartPoints.length, box: !!smartBox });
+    logger.log('sam_accept', { clicks: smartPoints.length, box: !!smartBox, focus: focusMode });
     clearSmart();
     return true;
   };
@@ -611,6 +612,18 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                 <button onClick={acceptAll} disabled={!proposals.length} title="A">Accept all</button>
                 <button onClick={() => void refineBoxes()} disabled={!anns.some((a) => a.kind === 'bbox')} title="R">Boxes → polygons</button>
               </div>
+              <label className="check small" title="Zooms SAM in on small objects (re-runs SAM on a window around the object)">
+                <input
+                  type="checkbox"
+                  checked={focusMode}
+                  onChange={(e) => {
+                    setFocusMode(e.target.checked);
+                    localStorage.setItem('labelloop.focus', e.target.checked ? 'on' : 'off');
+                    logger.log('focus_mode', { on: e.target.checked });
+                  }}
+                />
+                Smart tool focus mode (small objects)
+              </label>
               <label className="small">
                 Confidence threshold {threshold.toFixed(2)}
                 <input
