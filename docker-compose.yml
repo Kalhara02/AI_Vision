@@ -17,6 +17,7 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://labelloop:labelloop@db:5432/labelloop
       DATA_DIR: /data
