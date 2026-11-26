@@ -12,9 +12,14 @@ Action costs come from your own user-study logs when --logs is given (median
 times between the matching events), otherwise from the defaults below. The costs
 used are written to the output, so the report can state them.
 
-    docker compose run --rm backend python eval/simulate_annotator.py \
-        --detections eval/results/detections_n0.json eval/results/detections_n100.json \
-        --logs data/logs.json
+    docker compose run --rm backend python eval/simulate_annotator.py            (defaults below)
+    ... --target 85      stricter quality target for the SAM clicks
+
+Defaults: detections_n0 and detections_n100 from eval/results, logs from data/logs.json
+(each only if the file exists), SAM clicks of the app's default plain mode, target IoU 0.80.
+Both strategies are held to a comparable quality: the manual polygon is simplified with
+--epsilon px (about 0.8 to 0.9 IoU to the ground truth on small apples), SAM clicks until
+it reaches --target IoU.
 
 Writes: eval/results/simulated_effort.csv, simulated_effort.json, simulated_effort.png
 """
@@ -45,25 +50,38 @@ DEFAULT_COSTS = {  # seconds; assumptions unless calibrated from logs
 
 
 def calibrate(logs: list[dict]) -> dict:
-    """Median gap between consecutive events of the same kind on the same image (gaps > 10 s ignored)."""
+    """Median duration of each action, measured from the user-study logs (gaps > 10 s ignored).
+
+    Each action is timed from the previous event of the right kind on the same image and
+    participant, regardless of other events logged in between (pointer events, server replies):
+      vertex      poly_point -> next poly_point (manual mode)
+      sam_click   sam_click -> next sam_click
+      sam_accept  last sam_click -> sam_accept (looking at the outline, pressing Enter)
+      delete      last pointer_down -> ann_deleted / proposal_rejected (select, then delete)
+    """
     ev = sorted(logs, key=lambda e: e["t"])
     gaps = defaultdict(list)
-    last_by_img: dict[tuple, dict] = {}
+    last: dict[tuple, dict[str, float]] = defaultdict(dict)  # (participant, image) -> event -> time
+
+    def add(kind: str, t: float, since: float | None):
+        if since is not None and 0 < (t - since) / 1000 <= 10:
+            gaps[kind].append((t - since) / 1000)
+
     for e in ev:
         key = (e.get("payload", {}).get("participant") or e["session_id"], e.get("image_id"))
-        prev = last_by_img.get(key)
-        if prev is not None:
-            dt = (e["t"] - prev["t"]) / 1000
-            if 0 < dt <= 10:
-                if e["event"] == "poly_point" and prev["event"] == "poly_point" and e["mode"] == "manual":
-                    gaps["vertex"].append(dt)
-                elif e["event"] == "sam_click" and prev["event"] in ("sam_click", "sam_predict"):
-                    gaps["sam_click"].append(dt)
-                elif e["event"] == "sam_accept":
-                    gaps["sam_accept"].append(dt)
-                elif e["event"] in ("proposal_rejected", "ann_deleted"):
-                    gaps["delete"].append(dt)
-        last_by_img[key] = e
+        seen, t, name = last[key], e["t"], e["event"]
+        if name == "poly_point" and e["mode"] == "manual":
+            add("vertex", t, seen.get("poly_point"))
+        elif name == "sam_click":
+            add("sam_click", t, seen.get("sam_click"))
+        elif name == "sam_accept":
+            add("sam_accept", t, seen.get("sam_click"))
+        elif name in ("ann_deleted", "proposal_rejected"):
+            add("delete", t, seen.get("pointer_down"))
+        if name in ("sam_accept", "poly_closed", "image_open"):
+            seen.pop("sam_click", None)  # a new object starts: do not time across objects
+            seen.pop("poly_point", None)
+        seen[name] = t
     return {k: round(float(np.median(v)), 2) for k, v in gaps.items() if len(v) >= 5}
 
 
@@ -87,13 +105,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("data/minneapple"))
     ap.add_argument("--split", default="test")
-    ap.add_argument("--detections", type=Path, nargs="*", default=[])
+    ap.add_argument("--detections", type=Path, nargs="*",
+                    default=[p for p in (Path("eval/results/detections_n0.json"),
+                                         Path("eval/results/detections_n100.json")) if p.exists()])
     ap.add_argument("--threshold", type=float, default=0.5, help="suggestion score threshold (as in the app)")
-    ap.add_argument("--logs", type=Path, help="user-study logs to calibrate action costs")
+    ap.add_argument("--logs", type=Path, default=Path("data/logs.json") if Path("data/logs.json").exists() else None,
+                    help="user-study logs to calibrate action costs (default: data/logs.json if present)")
+    ap.add_argument("--target", type=int, default=80, choices=[80, 85, 90],
+                    help="IoU (percent) the simulated SAM user clicks until (same quality bar as manual)")
     ap.add_argument("--epsilon", type=float, default=2.0, help="polygon simplification for manual vertex count (px)")
     ap.add_argument("--max-images", type=int, default=0)
-    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus", "hybrid"],
-                    help="which SAM mode's clicks to use from sam_noc_objects.csv (the app uses focus)")
+    ap.add_argument("--sam-mode", default="plain", choices=["plain", "focus", "hybrid"],
+                    help="which SAM mode's clicks to use from sam_noc_objects.csv (the app default is plain)")
     args = ap.parse_args()
     out = results_dir()
 
@@ -116,7 +139,7 @@ def main():
         for r in csv.DictReader(open(sam_csv)):
             if r.get("mode", args.sam_mode) != args.sam_mode:
                 continue
-            noc[(r["image"], int(r["instance_id"]))] = int(r["noc85"])
+            noc[(r["image"], int(r["instance_id"]))] = int(r[f"noc{args.target}"])
             box_iou[(r["image"], int(r["instance_id"]))] = float(r["box_iou"])
     else:
         print("note: run sam_noc.py first for measured clicks; using 2 clicks per apple")
@@ -162,7 +185,7 @@ def main():
                 key = (im["file_name"], g["attributes"]["instance_id"])
                 if j not in matched:  # missed by the detector: segment with SAM clicks
                     t += clicks(g) * costs["sam_click"] + costs["sam_accept"]
-                elif box_iou.get(key, 1.0) < 0.85:  # box-prompt outline not good enough: fix with clicks
+                elif box_iou.get(key, 1.0) < args.target / 100:  # box-prompt outline not good enough: fix with clicks
                     t += max(1.0, clicks(g) - 1) * costs["sam_click"]
             row[name] = t
         rows.append(row)
@@ -174,7 +197,8 @@ def main():
         w.writerows([{k: (round(v, 1) if isinstance(v, float) else v) for k, v in r.items()} for r in rows])
     man = np.mean([r["manual"] for r in rows])
     summary = {"costs_seconds": costs, "calibrated_from_logs": sorted(calibrated), "n_images": len(rows),
-               "threshold": args.threshold, "strategies": {}}
+               "threshold": args.threshold, "target_iou": args.target / 100, "sam_mode": args.sam_mode,
+               "strategies": {}}
     for s in strategies:
         vals = [r[s] for r in rows]
         summary["strategies"][s] = {"seconds_per_crop": mean_sd(vals),
