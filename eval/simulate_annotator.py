@@ -38,9 +38,10 @@ import numpy as np
 from common import anns_by_image, load_coco, load_mask, mean_sd, results_dir
 
 DEFAULT_COSTS = {  # seconds; assumptions unless calibrated from logs
-    "vertex": 1.2,      # place one polygon vertex
-    "object": 1.5,      # per manual object: choose class, close the polygon
-    "sam_click": 1.5,   # aim + click + look at the SAM preview
+    "vertex": 1.2,      # place one more polygon vertex
+    "object": 2.5,      # manual: find the next apple and place its first vertex
+    "sam_first": 2.0,   # SAM: find the next apple and click it
+    "sam_click": 1.5,   # SAM: one correction click after looking at the preview
     "sam_accept": 0.8,  # press Enter on a good preview
     "accept_all": 1.0,  # press A once per image
     "verify": 0.4,      # glance at one accepted suggestion
@@ -49,39 +50,58 @@ DEFAULT_COSTS = {  # seconds; assumptions unless calibrated from logs
 }
 
 
-def calibrate(logs: list[dict]) -> dict:
-    """Median duration of each action, measured from the user-study logs (gaps > 10 s ignored).
+MIN_GAP = 0.4  # seconds
+ACTIONS = {"image_open", "sam_click", "sam_accept", "sam_cancel", "sam_box", "poly_point", "poly_closed",
+           "draft_cancelled", "proposal_accepted", "proposal_rejected", "proposals_accept_all",
+           "ann_deleted", "ann_created", "undo", "redo"}
 
-    Each action is timed from the previous event of the right kind on the same image and
-    participant, regardless of other events logged in between (pointer events, server replies):
-      vertex      poly_point -> next poly_point (manual mode)
-      sam_click   sam_click -> next sam_click
-      sam_accept  last sam_click -> sam_accept (looking at the outline, pressing Enter)
-      delete      last pointer_down -> ann_deleted / proposal_rejected (select, then delete)
+
+def calibrate(logs: list[dict]) -> dict:
+    """Median duration of each action, measured from the user-study logs.
+
+    Every action is timed per participant and image. Gaps over 10 s (distraction) and under
+    MIN_GAP (double clicks, bounced buttons) are ignored; a cost needs at least 5 samples.
+      object      previous action -> first vertex of a manual polygon (find the apple, start)
+      vertex      vertex -> next vertex of the same polygon
+      sam_first   previous action -> first SAM click of an object (find the apple, click)
+      sam_click   SAM click -> next SAM click of the same object (look at preview, correct)
+      sam_accept  last SAM click -> accept (check the outline, press Enter)
+      delete      last pointer_down -> ann_deleted / proposal_rejected
+    "Previous action" means the last deliberate user event (not pointer moves or server replies).
     """
     ev = sorted(logs, key=lambda e: e["t"])
     gaps = defaultdict(list)
     last: dict[tuple, dict[str, float]] = defaultdict(dict)  # (participant, image) -> event -> time
 
     def add(kind: str, t: float, since: float | None):
-        if since is not None and 0 < (t - since) / 1000 <= 10:
+        if since is not None and MIN_GAP <= (t - since) / 1000 <= 10:
             gaps[kind].append((t - since) / 1000)
 
     for e in ev:
         key = (e.get("payload", {}).get("participant") or e["session_id"], e.get("image_id"))
         seen, t, name = last[key], e["t"], e["event"]
         if name == "poly_point" and e["mode"] == "manual":
-            add("vertex", t, seen.get("poly_point"))
+            if "poly_point" in seen:
+                add("vertex", t, seen["poly_point"])
+            else:
+                add("object", t, seen.get("action"))
         elif name == "sam_click":
-            add("sam_click", t, seen.get("sam_click"))
+            if "sam_click" in seen:
+                add("sam_click", t, seen["sam_click"])
+            else:
+                add("sam_first", t, seen.get("action"))
         elif name == "sam_accept":
             add("sam_accept", t, seen.get("sam_click"))
         elif name in ("ann_deleted", "proposal_rejected"):
             add("delete", t, seen.get("pointer_down"))
-        if name in ("sam_accept", "poly_closed", "image_open"):
+        if name in ("sam_accept", "sam_cancel", "poly_closed", "draft_cancelled", "image_open"):
             seen.pop("sam_click", None)  # a new object starts: do not time across objects
             seen.pop("poly_point", None)
         seen[name] = t
+        if name in ACTIONS:
+            seen["action"] = t
+    n = {k: len(v) for k, v in gaps.items()}
+    print("calibration samples:", n)
     return {k: round(float(np.median(v)), 2) for k, v in gaps.items() if len(v) >= 5}
 
 
@@ -161,9 +181,10 @@ def main():
         clicks = lambda a: noc.get((im["file_name"], a["attributes"]["instance_id"]), noc_med)  # noqa: E731
         # manual
         verts = sum(manual_vertices(inst == a["attributes"]["instance_id"], args.epsilon) for a in gts)
-        row["manual"] = verts * costs["vertex"] + len(gts) * costs["object"]
-        # SAM only
-        row["sam"] = sum(clicks(a) * costs["sam_click"] + costs["sam_accept"] for a in gts)
+        row["manual"] = len(gts) * costs["object"] + (verts - len(gts)) * costs["vertex"]
+        # SAM only: find + first click, correction clicks, accept
+        sam_obj = lambda a: costs["sam_first"] + (clicks(a) - 1) * costs["sam_click"] + costs["sam_accept"]  # noqa: E731
+        row["sam"] = sum(sam_obj(a) for a in gts)
         # detector + SAM, per model
         for name, dets in det_sets.items():
             ds = sorted(dets.get(im["id"], []), key=lambda d: -d["score"])
@@ -184,7 +205,7 @@ def main():
             for j, g in enumerate(gts):
                 key = (im["file_name"], g["attributes"]["instance_id"])
                 if j not in matched:  # missed by the detector: segment with SAM clicks
-                    t += clicks(g) * costs["sam_click"] + costs["sam_accept"]
+                    t += sam_obj(g)
                 elif box_iou.get(key, 1.0) < args.target / 100:  # box-prompt outline not good enough: fix with clicks
                     t += max(1.0, clicks(g) - 1) * costs["sam_click"]
             row[name] = t

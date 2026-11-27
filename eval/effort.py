@@ -71,7 +71,9 @@ def main():
     ap.add_argument("--gt", type=Path, help="ground truth COCO of the crops (coco_crops_study.json)")
     ap.add_argument("--gt-masks", type=Path, help="default: <gt folder>/crops_study/masks")
     ap.add_argument("--idle", type=float, default=60.0, help="gaps longer than this (s) are not active time")
+    ap.add_argument("--tag", default="", help="suffix for the output files, e.g. 'submission' -> effort_summary_submission.md")
     args = ap.parse_args()
+    sfx = f"_{args.tag}" if args.tag else ""
 
     out = results_dir()
     events = json.loads(args.logs.read_text())
@@ -85,7 +87,7 @@ def main():
         for r in rows:
             r.update(q.get(r["image_id"], {}))
 
-    with open(out / "effort_images.csv", "w", newline="") as f:
+    with open(out / f"effort_images{sfx}.csv", "w", newline="") as f:
         cols = sorted({k for r in rows for k in r}, key=lambda k: list(rows[0]).index(k) if k in rows[0] else 99)
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -93,7 +95,7 @@ def main():
 
     acc = acceptance(events)
     if acc:
-        with open(out / "acceptance.csv", "w", newline="") as f:
+        with open(out / f"acceptance{sfx}.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(acc[0]))
             w.writeheader()
             w.writerows(acc)
@@ -130,7 +132,7 @@ def main():
     if acc:
         lines += ["", "| detector version | suggested | accepted | rejected | acceptance rate |", "| --- | --- | --- | --- | --- |"]
         lines += [f"| v{a['version']} | {a['shown']} | {a['accepted']} | {a['rejected']} | {a['acceptance_rate']} |" for a in acc]
-    (out / "effort_summary.md").write_text("\n".join(lines) + "\n")
+    (out / f"effort_summary{sfx}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
     import matplotlib
@@ -145,7 +147,7 @@ def main():
     ax.set_ylabel("active seconds per crop (mean ± sd)")
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
-    fig.savefig(out / "effort_time.png", dpi=160)
+    fig.savefig(out / f"effort_time{sfx}.png", dpi=160)
 
 
 def _group(rows, keys, value):

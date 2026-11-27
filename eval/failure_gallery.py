@@ -5,9 +5,12 @@
 
     docker compose run --rm backend python eval/failure_gallery.py --detections eval/results/detections_n100.json
 
-Writes: eval/results/failures_sam.png, failures_detector.png (green = ground truth,
-red = false positive, yellow = missed). Sort the examples into groups yourself
-(leaf occlusion, merged clusters, green apples, border cuts, shadow) for the report.
+Writes: eval/results/failures_sam.png and failures_detector.png.
+  SAM tiles:      green = ground-truth mask, magenta = SAM's mask after 5 simulated clicks
+                  (same click protocol as sam_noc.py), dots = clicks (white positive, black negative)
+  Detector tiles: thin green = ground truth, red = false positive, yellow = missed
+Sort the examples into groups yourself for the report. Use --no-sam-rerun to draw only the
+ground truth (no model needed).
 """
 from __future__ import annotations
 
@@ -46,7 +49,9 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/minneapple"))
     ap.add_argument("--detections", type=Path, help="detections_n<k>.json from detector_curve.py")
     ap.add_argument("--n", type=int, default=8)
-    ap.add_argument("--sam-mode", default="focus", choices=["plain", "focus", "hybrid"])
+    ap.add_argument("--sam-mode", default="plain", choices=["plain", "focus", "hybrid"])
+    ap.add_argument("--clicks", type=int, default=5, help="clicks to simulate for the SAM overlay")
+    ap.add_argument("--no-sam-rerun", action="store_true", help="draw ground truth only")
     args = ap.parse_args()
     out = results_dir()
     coco = load_coco(args.data / "coco_crops_test.json")
@@ -58,19 +63,36 @@ def main():
     if sam_csv.exists():
         rows = [r for r in csv.DictReader(open(sam_csv)) if r.get("mode", args.sam_mode) == args.sam_mode]
         rows = sorted(rows, key=lambda r: float(r["iou5"]))[: args.n]
+        sam = None
+        if not args.no_sam_rerun:
+            from app.ml.sam import SamService
+            from sam_noc import next_click
+            sam = SamService()
         tiles = []
         for r in rows:
             im = by_name[r["image"]]
-            rgb = load_rgb(img_dir / im["file_name"]).copy()
+            image = load_rgb(img_dir / im["file_name"])
+            rgb = image.copy()
             gt = (load_mask(mask_dir / im["mask_file"]) == int(r["instance_id"])).astype(np.uint8)
+            clicks = []
+            if sam is not None:
+                pred, prev = np.zeros(gt.shape, bool), None
+                for _ in range(args.clicks):
+                    clicks.append(next_click(gt.astype(bool), pred))
+                    prev = sam.segment(im["file_name"], image, clicks, prev=prev, mode=args.sam_mode)
+                    pred = prev["mask"].astype(bool)
+                ps, _ = cv2.findContours(pred.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                cv2.drawContours(rgb, ps, -1, (255, 0, 255), 1)
             cs, _ = cv2.findContours(gt, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-            cv2.drawContours(rgb, cs, -1, (0, 255, 0), 2)
+            cv2.drawContours(rgb, cs, -1, (0, 255, 0), 1)
+            for cx_, cy_, pos in clicks:
+                cv2.circle(rgb, (int(cx_), int(cy_)), 2, (255, 255, 255) if pos else (0, 0, 0), -1)
             x, y, w, h = cv2.boundingRect(gt)
             pad = max(w, h) * 2 + 20
             cx, cy = x + w // 2, y + h // 2
             crop = rgb[max(0, cy - pad):cy + pad, max(0, cx - pad):cx + pad]
             t = tile(crop)
-            cv2.putText(t, f"IoU@5 {float(r['iou5']):.2f}  NoC90 {r['noc90']}", (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.putText(t, f"IoU@5 {float(r['iou5']):.2f}  NoC90 {r['noc90']}  {int(gt.sum())}px", (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             tiles.append(t)
         if tiles:
             cv2.imwrite(str(out / "failures_sam.png"), cv2.cvtColor(grid(tiles), cv2.COLOR_RGB2BGR))

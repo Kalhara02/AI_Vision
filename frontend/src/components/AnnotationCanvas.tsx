@@ -57,6 +57,7 @@ interface Props {
   smartPreview?: Pt[] | null;
   onSmartClick?: (pt: Pt, positive: boolean) => void;
   onSmartBox?: (b: BBox) => void;
+  showLabels?: boolean;
 }
 
 interface View {
@@ -66,6 +67,7 @@ interface View {
 }
 
 const MIN_BOX_SCREEN_PX = 4;
+const HINT_BAR_PX = 48;
 const CLOSE_RADIUS_SCREEN_PX = 10;
 
 const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanvas(props, ref) {
@@ -73,6 +75,11 @@ const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanv
   const proposals = props.proposals ?? [];
   const smartPoints = props.smartPoints ?? [];
   const smartPreview = props.smartPreview ?? null;
+  const labelText = (a: Annotation): string => {
+    const score = a.score != null ? ` ${Math.round(a.score * 100)}%` : '';
+    if (classes.size > 1) return `${nameOf(a)}${a.source !== 'manual' ? ' · AI' : ''}${score}`;
+    return a.source !== 'manual' ? `AI${score}` : '';
+  };
   const smartShift = useRef(false);
 
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -112,8 +119,10 @@ const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanv
 
   const fit = () => {
     if (!size.w || !size.h) return;
-    const s = Math.min(size.w / iw, size.h / ih) * 0.96;
-    setView({ scale: s, x: (size.w - iw * s) / 2, y: (size.h - ih * s) / 2 });
+    // keep the bottom strip free for the shortcut bar so it never covers the image
+    const availH = Math.max(1, size.h - HINT_BAR_PX);
+    const s = Math.min(size.w / iw, availH / ih) * 0.96;
+    setView({ scale: s, x: (size.w - iw * s) / 2, y: (availH - ih * s) / 2 });
   };
 
   useEffect(() => {
@@ -488,8 +497,12 @@ const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanv
               </>
             )}
 
-            {/* class labels */}
-            {annotations.map((a) => (
+            {/* class labels: with one class the colour already says the class, so only AI
+                annotations get a short tag (dense images stay readable); L toggles them */}
+            {props.showLabels !== false && annotations.map((a) => {
+              const text = labelText(a);
+              if (!text) return null; // react-konva cannot render a bare '' string
+              return (
               // labels are drawn in screen pixels (inverse scale) so they stay readable at any zoom
               <Label
                 key={`l${a.uid}`}
@@ -500,14 +513,10 @@ const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanv
                 scaleY={1 / view.scale}
               >
                 <Tag fill={colorOf(a)} />
-                <Text
-                  text={`${nameOf(a)}${a.source !== 'manual' ? ' · AI' : ''}${a.score != null ? ` ${Math.round(a.score * 100)}%` : ''}`}
-                  fontSize={11}
-                  padding={2}
-                  fill="#111"
-                />
+                <Text text={text} fontSize={classes.size > 1 ? 11 : 9} padding={classes.size > 1 ? 2 : 1} fill="#111" />
               </Label>
-            ))}
+              );
+            })}
 
             <Transformer
               ref={trRef}

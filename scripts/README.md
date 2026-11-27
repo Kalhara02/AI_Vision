@@ -40,3 +40,10 @@ Notes
 - Polygons follow pixel centres, so polygon area is a little smaller than the pixel count
   (e.g. 126 vs 149 for a small apple). That's why evaluation uses masks.
 - `data/` is git-ignored. Never commit the dataset images.
+
+## prepare_release.py
+
+Builds the public model and dataset folders for Hugging Face (`data/release/model`, `data/release/dataset`)
+with model and dataset cards, and can upload them after you log in yourself:
+
+    docker compose run --rm backend python scripts/prepare_release.py --project 4 --export data/export.zip

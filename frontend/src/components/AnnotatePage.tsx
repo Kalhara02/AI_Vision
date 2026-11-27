@@ -55,6 +55,7 @@ const SHORTCUTS: [string, string][] = [
   ['Wheel, + / −', 'zoom'],
   ['F', 'fit image to screen'],
   ['H', 'hide / show annotations'],
+  ['L', 'hide / show labels'],
   ['?', 'this help'],
 ];
 
@@ -68,6 +69,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const [activeClassId, setActiveClassId] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hidden, setHidden] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [showHelp, setShowHelp] = useState(false);
 
@@ -512,6 +514,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
     else if (k === '+' || k === '=') canvasRef.current?.zoomBy(1.25);
     else if (k === '-') canvasRef.current?.zoomBy(0.8);
     else if (k === 'h' || k === 'H') setHidden((h) => !h);
+    else if (k === 'l' || k === 'L') setShowLabels((v) => !v);
     else if (k === '?') setShowHelp((s) => !s);
     else handled = false;
 
@@ -607,6 +610,9 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
           <button className={`tool-btn small ${hidden ? 'active' : ''}`} onClick={() => setHidden((h) => !h)} title="Hide annotations (H)">
             <Icon name={hidden ? 'eyeOff' : 'eye'} />
           </button>
+          <button className={`tool-btn small ${showLabels ? '' : 'active'}`} onClick={() => setShowLabels((v) => !v)} title="Show or hide labels (L)">
+            <Icon name="tag" />
+          </button>
           <span className="grow" />
           <button className="tool-btn small" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)"><Icon name="keyboard" /></button>
         </nav>
@@ -634,6 +640,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
               smartPreview={smartPreview}
               onSmartClick={onSmartClick}
               onSmartBox={onSmartBox}
+              showLabels={showLabels}
             />
           ) : (
             <div className="canvas-loading">Loading…</div>
