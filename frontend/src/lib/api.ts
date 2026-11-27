@@ -82,7 +82,12 @@ export const api = {
   samBoxes: (imageId: number, boxes: BBox[]) =>
     request<{ polygons: (Pt[] | null)[]; scores: number[] }>(`/api/images/${imageId}/sam/boxes`, json('POST', { boxes })),
   proposals: (imageId: number, threshold: number) =>
-    request<{ version: number; proposals: { bbox: BBox; score: number }[]; ms: number }>(
+    request<{
+      version: number;
+      proposals: { bbox: BBox; score: number; class_id: number; source: 'trained' | 'zero-shot' }[];
+      zero_shot_classes: string[];
+      ms: number;
+    }>(
       `/api/images/${imageId}/proposals?threshold=${threshold}`,
     ),
   rank: (projectId: number) => request<{ started: boolean; n_images: number }>(`/api/projects/${projectId}/model/rank`, { method: 'POST' }),

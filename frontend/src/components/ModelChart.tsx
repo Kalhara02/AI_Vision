@@ -21,9 +21,9 @@ export default function ModelChart({ rounds }: { rounds: TrainingRound[] }) {
   return (
     <div className="model-chart">
       <div className="model-chart-title">
-        <span>AP50 before vs after each round</span>
+        <span>mAP50 before vs after each round</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Detector AP50 before and after each training round">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Detector mAP50 before and after each training round">
         <line x1={0} x2={W} y1={H - bottom} y2={H - bottom} stroke="var(--line)" />
         {scored.map((r, i) => {
           const x0 = i * (pw + pairGap);

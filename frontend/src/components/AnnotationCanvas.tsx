@@ -371,7 +371,12 @@ const AnnotationCanvas = forwardRef<CanvasHandle, Props>(function AnnotationCanv
             {proposals.map((q) => (
               <Label key={`pl${q.uid}`} x={q.bbox[0]} y={q.bbox[1] - px(14)} listening={false} scaleX={1 / view.scale} scaleY={1 / view.scale}>
                 <Tag fill="#ffd400" opacity={0.85} />
-                <Text text={`${Math.round(q.score * 100)}%`} fontSize={10} padding={1} fill="#111" />
+                <Text
+                  text={`${classes.size > 1 ? `${classes.get(q.class_id)?.name ?? '?'} ` : ''}${Math.round(q.score * 100)}%`}
+                  fontSize={10}
+                  padding={1}
+                  fill="#111"
+                />
               </Label>
             ))}
 

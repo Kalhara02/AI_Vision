@@ -69,3 +69,21 @@ def binary_entropy(p: float) -> float:
 
 def image_uncertainty(scores: list[float], min_score: float = 0.05) -> float:
     return float(sum(binary_entropy(s) for s in scores if s >= min_score))
+
+
+def map_at_iou(detections: list[list[dict]], ground_truth: list[list[tuple[list[float], int]]],
+               iou_thr: float = 0.5) -> float:
+    """Class-aware mean AP: detections[i] = [{"bbox", "score", "class_id"}], ground_truth[i] = [(box, class_id)].
+
+    AP is computed per class that has ground truth (ap_at_iou on that class only) and averaged, the
+    PASCAL VOC / COCO convention. A detection of the wrong class never matches.
+    """
+    classes = sorted({c for g in ground_truth for _, c in g})
+    if not classes:
+        return 0.0
+    aps = []
+    for c in classes:
+        dets = [[d for d in ds if d.get("class_id") == c] for ds in detections]
+        gts = [[b for b, k in g if k == c] for g in ground_truth]
+        aps.append(ap_at_iou(dets, gts, iou_thr))
+    return float(np.mean(aps))

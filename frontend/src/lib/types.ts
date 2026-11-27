@@ -61,6 +61,8 @@ export interface Proposal {
   uid: string;
   bbox: BBox;
   score: number;
+  class_id: number; // one of the project's own classes
+  source: 'trained' | 'zero-shot';
 }
 
 export interface TrainingRound {

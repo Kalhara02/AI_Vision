@@ -1,4 +1,4 @@
-.PHONY: up down logs test test-local reset data eval eval-detector eval-sam eval-effort eval-failures eval-quick eval-sim eval-al
+.PHONY: up down logs test test-local reset data data-coco eval eval-detector eval-sam eval-effort eval-failures eval-quick eval-sim eval-al eval-generalize eval-v5
 
 up:            ## build and start everything (http://localhost:8080)
 	docker compose up --build
@@ -28,6 +28,15 @@ data:          ## prepare MinneApple inside Docker (dataset extracted to data/ra
 	docker compose run --rm backend python scripts/show_gt.py --coco data/minneapple/coco_crops_study.json --images data/minneapple/crops_study/images --out data/gt_check.png
 
 RUN = docker compose run --rm backend python
+
+data-coco:     ## second domain: COCO val2017 subset (download val2017 + annotations into data/raw/coco first)
+	$(RUN) scripts/make_coco_subset.py
+
+eval-generalize: ## zero-shot vs learning loop vs SAM on the COCO subset (slow on CPU, resumable)
+	$(RUN) eval/generalize.py
+
+eval-v5:       ## score the model the app trained in project 5 on the MinneApple test crops
+	$(RUN) eval/eval_app_model.py --project 5
 
 eval-detector: ## learning curve: pretrained vs fine-tuned on 25/50/100/200 crops (slow on CPU)
 	$(RUN) eval/detector_curve.py --sizes 0 25 50 100 200

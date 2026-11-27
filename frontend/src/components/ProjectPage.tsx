@@ -185,7 +185,7 @@ export default function ProjectPage({ projectId }: { projectId: number }) {
             icon="cpu"
             label="Detector"
             value={model ? `v${model.version}` : '–'}
-            sub={lastAccepted?.ap50_new != null ? `AP50 ${lastAccepted.ap50_new.toFixed(2)} on held-out` : model ? 'pretrained (COCO)' : 'AI off'}
+            sub={lastAccepted?.ap50_new != null ? `mAP50 ${lastAccepted.ap50_new.toFixed(2)} on held-out` : model ? 'zero-shot (OWLv2)' : 'AI off'}
           />
           <Stat
             icon="clock"

@@ -7,7 +7,7 @@ import TopNav from './TopNav';
 
 const STEPS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'upload', title: 'Upload', text: 'Drop in your images. JPEG, PNG, WebP and 16-bit TIFF.' },
-  { icon: 'zap', title: 'AI suggests', text: 'A detector proposes every object; SAM outlines one with a click.' },
+  { icon: 'zap', title: 'AI suggests', text: 'Type your own classes: suggestions start zero-shot, SAM outlines anything with a click.' },
   { icon: 'check', title: 'You correct', text: 'Accept, fix or delete. The detector retrains on your corrections.' },
   { icon: 'download', title: 'Export', text: 'COCO, YOLO, YOLO-seg or Pascal VOC, with the images.' },
 ];
@@ -52,11 +52,11 @@ export default function ProjectList() {
             <h3><Icon name="plus" /> New project</h3>
             <label>
               Name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Orchard apples" required />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Street scenes" required />
             </label>
             <label>
               Classes <span className="muted">(comma separated, editable later)</span>
-              <input value={classes} onChange={(e) => setClasses(e.target.value)} placeholder="apple" />
+              <input value={classes} onChange={(e) => setClasses(e.target.value)} placeholder="car, person, traffic light" />
             </label>
             <button type="submit" className="primary big">Create project</button>
             {error && <p className="error small">{error}</p>}

@@ -1,4 +1,4 @@
-"""AI assistance endpoints: SAM click-to-segment, detector proposals, retraining.
+"""AI assistance endpoints: SAM click-to-segment, suggestions (zero-shot + trained), retraining.
 
 Model code is imported lazily, so the rest of the API (and its tests) works
 without PyTorch installed.
@@ -63,7 +63,9 @@ def ai_status():
     except ImportError:
         return {"enabled": False, "reason": "PyTorch not installed"}
     from ..ml.sam import sam_service
-    return {"enabled": True, "device": dev, "sam_model": sam_service.model_id, "sam_loaded": sam_service.loaded}
+    from ..ml.zeroshot import zero_shot_service
+    return {"enabled": True, "device": dev, "sam_model": sam_service.model_id, "sam_loaded": sam_service.loaded,
+            "zero_shot_model": zero_shot_service.model_id, "zero_shot_loaded": zero_shot_service.loaded}
 
 
 # ---------------------------------------------------------------- SAM
@@ -110,9 +112,11 @@ def sam_boxes(image_id: int, body: SamBoxesIn, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------- detector
 @router.get("/images/{image_id}/proposals")
 def proposals(image_id: int, threshold: float = Query(0.5, ge=0.0, le=1.0), db: Session = Depends(get_db)):
+    """Suggestions for the project's own classes: trained model where it knows a class, zero-shot elsewhere."""
     det = _detector()
     image = _image(db, image_id)
-    return det.predict(image.project_id, storage.image_path(image.stored_name), threshold)
+    return det.predict(image.project_id, storage.image_path(image.stored_name), threshold,
+                       _classes(db, image.project_id))
 
 
 @router.get("/projects/{project_id}/model")
@@ -120,13 +124,25 @@ def model_status(project_id: int):
     return _detector().status(project_id)
 
 
+def _classes(db: Session, project_id: int) -> list[tuple[int, str]]:
+    """The project's own label set, (id, name) in creation order. Nothing is hard-coded."""
+    rows = db.execute(select(models.LabelClass.id, models.LabelClass.name)
+                      .where(models.LabelClass.project_id == project_id).order_by(models.LabelClass.id)).all()
+    return [(int(i), n) for i, n in rows]
+
+
 def _training_inputs(db: Session, project_id: int):
     from ..ml.detector import Sample
 
     images = db.scalars(select(models.Image).where(models.Image.project_id == project_id)
                         .order_by(models.Image.id)).all()
-    samples = [Sample(storage.image_path(im.stored_name), [a.bbox for a in im.annotations])
-               for im in images if im.status == "done" and im.annotations]
+    valid = {cid for cid, _ in _classes(db, project_id)}
+    samples = []
+    for im in images:
+        anns = [a for a in im.annotations if a.class_id in valid]  # skip labels of deleted classes
+        if im.status == "done" and anns:
+            samples.append(Sample(storage.image_path(im.stored_name), [a.bbox for a in anns],
+                                  [a.class_id for a in anns]))
     to_rank = [(im.id, storage.image_path(im.stored_name)) for im in images if im.status != "done"]
     return samples, to_rank
 
@@ -144,7 +160,8 @@ def maybe_auto_retrain(db: Session, project_id: int) -> bool:
     samples, to_rank = _training_inputs(db, project_id)
     if len(samples) < 5 or len(samples) - det.images_seen(project_id) < AUTO_RETRAIN_EVERY:
         return False
-    return det.start_training(project_id, samples, TrainConfig(epochs=RETRAIN_EPOCHS), "auto", to_rank)
+    return det.start_training(project_id, samples, TrainConfig(epochs=RETRAIN_EPOCHS), "auto",
+                              _classes(db, project_id), to_rank)
 
 
 @router.post("/projects/{project_id}/model/train", status_code=202)
@@ -156,7 +173,7 @@ def train(project_id: int, epochs: int = Query(RETRAIN_EPOCHS, ge=1, le=100), db
     samples, to_rank = _training_inputs(db, project_id)
     if len(samples) < 5:
         raise HTTPException(409, f"need at least 5 finished images with annotations, have {len(samples)}")
-    if not det.start_training(project_id, samples, TrainConfig(epochs=epochs), "manual", to_rank):
+    if not det.start_training(project_id, samples, TrainConfig(epochs=epochs), "manual", _classes(db, project_id), to_rank):
         raise HTTPException(409, "the model is busy (training or ranking)")
     return {"started": True, "n_images": len(samples), "auto_every": AUTO_RETRAIN_EVERY}
 
@@ -166,7 +183,7 @@ def rank(project_id: int, db: Session = Depends(get_db)):
     """Score every unfinished image by detector uncertainty (active learning queue)."""
     det = _detector()
     _, to_rank = _training_inputs(db, project_id)
-    if not det.start_ranking(project_id, to_rank):
+    if not det.start_ranking(project_id, to_rank, _classes(db, project_id)):
         raise HTTPException(409, "nothing to rank, or the model is busy")
     return {"started": True, "n_images": len(to_rank)}
 

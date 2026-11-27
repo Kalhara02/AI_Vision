@@ -4,27 +4,31 @@ An AI-assisted image annotation platform, built for the AI Vision course project
 Users upload images, label them with boxes and polygons, get help from computer vision
 models while doing it, and export the result in standard formats.
 
-Two models help while labeling, both running locally in our own code:
+It is general-purpose: any image domain, and every project defines its own label set (nothing is
+hard-coded). Three models help while labeling, all downloaded once and run locally in our own code:
 
-- **SAM 2.1** (click-to-segment): click an apple, get its outline; right-click to remove
-  background; drag a box for a box prompt. Also turns detector boxes into polygons in one batch.
-- **Focus mode** (our addition for small objects): SAM resizes every input to 1024 px, so a 20 px apple
-  stays tiny. After the first click we re-run SAM on a window about 3x the object's size, cached per
-  object, so the apple fills SAM's view. Evaluated against plain SAM in `eval/sam_noc.py`.
-- **Hybrid mode**: the evaluation showed plain SAM gives the better first click while focus mode
-  halves the apples that never reach 80% IoU, so hybrid uses plain for the first click and the focus
-  window for corrections. The default mode is chosen on the validation split, results are reported on test.
-- **Faster R-CNN** (pre-labels): suggestions appear when an image opens. Round 0 uses the
-  COCO-pretrained "apple" class. Every 20 finished images (or on **Retrain now**) it is fine-tuned
-  on the user's corrected labels with our own training loop, so suggestions improve as the user works.
-- **Model guard**: each round trains on ~80% of the finished images and compares new vs. current model
-  on the other ~20% (AP50, our own implementation). A worse model is never deployed.
-- **Active learning queue**: after each round all unfinished images are ranked by detector
-  uncertainty; "Next" can jump to the most uncertain image.
-- **Insights**: the project page shows time per image (manual vs. assisted), how many suggestions
-  were kept per model version, and every training round, live from the interaction logs.
+- **Zero-shot suggestions (OWLv2)**: from the very first image, an open-vocabulary detector is
+  prompted with the project's own class names ("a photo of a pothole", "a photo of a forklift"),
+  so suggestions work for new classes and new image types with no training at all.
+- **Learning loop (Faster R-CNN)**: every 20 finished images (or on **Retrain now**) a detector with
+  one output per project class is fine-tuned on the user's corrected labels with our own training
+  loop. Classes the model has seen fewer than 10 times, or that were added later, keep zero-shot help.
+- **Model guard**: each round trains on ~80% of the finished images and compares the new model with
+  what the user currently gets (zero-shot in round 1) on the other ~20%, by class-aware mAP50 (our own
+  implementation). Worse suggestions are never deployed.
+- **SAM 2.1** (click-to-segment, class-agnostic): click any object, get its outline; right-click to
+  remove background; drag a box for a box prompt. Also turns suggestion boxes into polygons in one batch.
+- **Focus and hybrid modes** (our addition for small objects): SAM resizes every input to 1024 px, so a
+  20 px object stays tiny; focus mode re-runs SAM on a window about 3x the object's size. Evaluated
+  against plain SAM in `eval/sam_noc.py`; plain stays the default.
+- **Active learning queue**: after each round all unfinished images are ranked by uncertainty;
+  "Next" can jump to the most uncertain image.
+- **Insights**: time per image (manual vs. assisted), suggestions kept per model version, and every
+  training round, live from the interaction logs.
 
-Demo dataset: MinneApple (orchard apples). See `scripts/README.md` and `eval/README.md`.
+Evaluated on two domains: MinneApple (orchard apples, one small dense class: the in-depth case study)
+and a six-class COCO subset (street scenes, homes, animals: the generalization check).
+See `scripts/README.md` and `eval/README.md`.
 
 ## Quick start
 
@@ -147,10 +151,11 @@ forked or wrapped, and no model is called through a hosted API.
 | COCO / YOLO / VOC exporters | Python standard library |
 | Interaction logger and effort metrics | |
 | SAM integration: encoder cache, click/box prompting, focus mode for small objects, mask to polygon, batch box refinement | SAM 2.1 (`sam2` package, Meta), pretrained `sam2.1-hiera-tiny` |
-| Detector service, cold start via COCO "apple", fine-tuning loop (data, augmentation, optimiser, schedule, versioning) | torchvision Faster R-CNN ResNet-50 FPN v2, COCO weights, PyTorch |
-| Training rounds: auto trigger, hold-out guard, AP50 metric, uncertainty ranking (`app/ml/metrics.py`), next-image queue | NumPy |
+| Zero-shot integration: prompts from the project's label names, decoding, per-class NMS, score calibration, cache | OWLv2 (`google/owlv2-base-patch16-ensemble`, Hugging Face `transformers`) |
+| Detector service, multi-class fine-tuning loop on the project's own classes (data, label mapping, augmentation, optimiser, schedule, versioning), zero-shot fallback for weak or new classes | torchvision Faster R-CNN ResNet-50 FPN v2, COCO weights, PyTorch |
+| Training rounds: auto trigger, hold-out guard, class-aware mAP50 metric, uncertainty ranking (`app/ml/metrics.py`), next-image queue | NumPy |
 | Effort analytics shared by the app and the report (`app/analytics.py`) | NumPy |
-| Evaluation: learning curve, NoC click simulation, simulated annotator, active learning vs. random, effort + quality from logs, failure gallery | pycocotools (mAP), SciPy (Hungarian matching, Wilcoxon), Matplotlib |
+| Evaluation: learning curve, NoC click simulation, simulated annotator, active learning vs. random, effort + quality from logs, failure gallery, second-domain generalization (`eval/generalize.py`) | pycocotools (mAP), SciPy (Hungarian matching, Wilcoxon), Matplotlib |
 | Data preparation (split, mask to COCO, crops) | OpenCV, NumPy |
 
 ## Project structure
@@ -163,13 +168,14 @@ backend/
     schemas.py         request/response validation
     storage.py         image ingestion (EXIF, 16-bit)
     geometry.py        shared geometry (area, IoU, clipping)
-    routers/           projects, images + annotations, logs, export
+    routers/           projects, images + annotations, logs, export, ai
+    ml/                zero-shot (OWLv2), detector + training loop, SAM, metrics
     export/            format writers and zip packaging
   tests/               exporter/geometry/storage tests, end-to-end API test
 frontend/
   src/components/      ProjectList, ProjectPage, AnnotatePage, AnnotationCanvas
   src/lib/             API client, logger, undo history, router, geometry
-eval/                  evaluation scripts (phase 4)
+eval/                  evaluation scripts (MinneApple case study + COCO generalization)
 docker-compose.yml
 ```
 
@@ -180,8 +186,12 @@ docker-compose.yml
   ONNX export; we measured click latency instead (logged per click) and list it as future work.
 - **Faster R-CNN instead of YOLO**: torchvision lets us write and show the whole training loop ourselves.
 - **Full replacement on save**: the browser owns undo/redo; one request replaces an image's annotations.
-- **Limitations**: one class and one domain; CPU training is slow (GPU compose file provided); the user study
-  is small; our MinneApple split differs from the official benchmark's test set.
+- **Zero-shot first, learned later**: an open-vocabulary detector needs no labels but is generic; the fine-tuned
+  detector needs labels but learns the project's own policy (e.g. "no fallen apples"). The guard decides per
+  project when the learned model is better.
+- **Limitations**: zero-shot quality depends on how well a class name describes the object; CPU training is slow
+  (GPU compose file provided); the user study is small and on one domain; our MinneApple split differs from the
+  official benchmark's test set.
 
 ## References
 
@@ -189,6 +199,7 @@ docker-compose.yml
 - SAM 2: N. Ravi et al. SAM 2: Segment Anything in Images and Videos. arXiv:2408.00714, 2024.
 - Faster R-CNN: S. Ren, K. He, R. Girshick, J. Sun. NeurIPS 2015. torchvision v2 weights: Y. Li et al., 2021.
 - COCO: T.-Y. Lin et al. Microsoft COCO: Common Objects in Context. ECCV 2014.
+- OWLv2: M. Minderer, A. Gritsenko, N. Houlsby. Scaling Open-Vocabulary Object Detection. NeurIPS 2023.
 - Active learning: B. Settles. Active Learning Literature Survey. University of Wisconsin-Madison, TR 1648, 2009.
 - Focus view idea: X. Chen et al. FocalClick: Towards Practical Interactive Image Segmentation. CVPR 2022.
 - NoC protocol: K. Sofiiuk, I. Petrov, A. Konushin. Reviving Iterative Training with Mask Guidance for Interactive Segmentation (RITM). ICIP 2022.

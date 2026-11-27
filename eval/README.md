@@ -13,6 +13,8 @@ Prepare the data first with `make data ...` (see `scripts/README.md`).
 | `make eval-sim` | simulated annotator: seconds per crop for manual, SAM only, detector+SAM (pretrained vs. fine-tuned); action costs calibrated from your logs if `data/logs.json` exists | `simulated_effort.json/.png` |
 | `make eval-al` | active learning: uncertainty vs. random sampling over 4 rounds | `active_learning.csv/.png` |
 | `make eval-effort` | manual vs. assisted time, clicks, quality vs. ground truth, suggestion acceptance | `effort_summary.md`, `effort_time.png` |
+| `make eval-v5` | the model the app trained (project 5) on the MinneApple test crops | `app_model_p5_v5.json` |
+| `make data-coco` + `make eval-generalize` | second domain (6 COCO classes): zero-shot OWLv2 vs. the learning loop after 25/50/100 images, and SAM NoC | `generalize_coco_sub.json` |
 
 ## User study (effort)
 

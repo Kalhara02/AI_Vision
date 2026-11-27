@@ -77,6 +77,7 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
   const assisted = logger.mode === 'assisted';
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [modelVersion, setModelVersion] = useState<number | null>(null);
+  const [zeroShotClasses, setZeroShotClasses] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(0.5);
   const [smartPoints, setSmartPoints] = useState<SmartPoint[]>([]);
   const [smartBox, setSmartBox] = useState<BBox | null>(null);
@@ -211,12 +212,12 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
     if (t !== 'select') setSelected(null);
   };
 
-  const create = (shape: NewShape, source: Source = 'manual', score: number | null = null) => {
-    if (!activeClass) {
+  const create = (shape: NewShape, source: Source = 'manual', score: number | null = null, classId?: number) => {
+    if (!activeClass && classId == null) {
       setError('Create a class first (project page).');
       return;
     }
-    const a: Annotation = { uid: newUid(), class_id: activeClass.id, source, score, ...shape };
+    const a: Annotation = { uid: newUid(), class_id: classId ?? activeClass!.id, source, score, ...shape };
     history.set((prev) => [...prev, a]);
     logger.log('ann_created', { kind: a.kind, source: a.source, n_points: a.points?.length ?? 4 });
   };
@@ -250,9 +251,13 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
       if (isCancelled() || id !== currentIdRef.current) return;
       // skip suggestions for objects that are already labeled (revisiting an image)
       const fresh = r.proposals.filter((q) => !existing.some((a) => bboxIou(a.bbox, q.bbox) > 0.5));
-      setProposals(fresh.map((q) => ({ uid: newUid(), bbox: q.bbox, score: q.score })));
+      setProposals(fresh.map((q) => ({ uid: newUid(), bbox: q.bbox, score: q.score, class_id: q.class_id, source: q.source })));
       setModelVersion(r.version);
-      logger.log('proposals_shown', { n: fresh.length, version: r.version, threshold: thresholdRef.current, ms: r.ms });
+      setZeroShotClasses(r.zero_shot_classes ?? []);
+      logger.log('proposals_shown', {
+        n: fresh.length, version: r.version, threshold: thresholdRef.current, ms: r.ms,
+        n_zero_shot: fresh.filter((q) => q.source === 'zero-shot').length,
+      });
     } catch (e) {
       setError(`Detector: ${(e as Error).message}`);
     }
@@ -263,17 +268,17 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
     if (!q) return;
     setProposals((ps) => ps.filter((x) => x.uid !== uid));
     if (accept) {
-      create({ kind: 'bbox', bbox: q.bbox, points: null }, 'detector', q.score);
-      logger.log('proposal_accepted', { score: q.score, version: modelVersion });
+      create({ kind: 'bbox', bbox: q.bbox, points: null }, 'detector', q.score, q.class_id);
+      logger.log('proposal_accepted', { score: q.score, version: modelVersion, class_id: q.class_id, source: q.source });
     } else {
-      logger.log('proposal_rejected', { score: q.score, version: modelVersion });
+      logger.log('proposal_rejected', { score: q.score, version: modelVersion, class_id: q.class_id, source: q.source });
     }
   };
 
   const acceptAll = () => {
-    if (!proposals.length || !activeClass) return;
+    if (!proposals.length) return;
     const added: Annotation[] = proposals.map((q) => ({
-      uid: newUid(), class_id: activeClass.id, kind: 'bbox', bbox: q.bbox, points: null, source: 'detector', score: q.score,
+      uid: newUid(), class_id: q.class_id, kind: 'bbox', bbox: q.bbox, points: null, source: 'detector', score: q.score,
     }));
     history.set((prev) => [...prev, ...added]);
     logger.log('proposals_accept_all', { n: added.length, version: modelVersion });
@@ -678,7 +683,14 @@ export default function AnnotatePage({ projectId, imageId }: { projectId: number
                   <span className={`count-badge ${proposals.length ? 'live' : ''}`}>{proposals.length}</span>
                 </div>
                 <div className="muted small">
-                  Detector {modelVersion != null ? `v${modelVersion}` : '…'}{modelVersion === 0 ? ' · pretrained on COCO' : ' · trained on your labels'}
+                  {modelVersion == null
+                    ? 'Detector …'
+                    : modelVersion === 0
+                      ? 'Zero-shot from your class names (OWLv2)'
+                      : `Detector v${modelVersion} · trained on your labels`}
+                  {modelVersion != null && modelVersion > 0 && zeroShotClasses.length > 0 && (
+                    <> · zero-shot for {zeroShotClasses.join(', ')}</>
+                  )}
                 </div>
                 <div className="row">
                   <button onClick={acceptAll} disabled={!proposals.length} title="Accept all suggestions (A)">
